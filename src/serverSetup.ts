@@ -2,6 +2,8 @@ import * as crypto from 'crypto';
 import Log from './common/logger';
 import { getVSCodeServerConfig } from './serverConfig';
 import SSHConnection from './ssh/sshConnection';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface ServerInstallOptions {
     id: string;
@@ -88,6 +90,15 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
     if (platform === 'windows') {
         const installServerScript = generatePowerShellInstallScript(installOptions);
 
+        // 保存 PowerShell 安装脚本到本地，便于后续定位问题
+        try {
+            const ps1Path = path.join(process.cwd(), 'vscode-server-install.ps1');
+            fs.writeFileSync(ps1Path, installServerScript, 'utf8');
+            logger.info(`已将 PowerShell 安装脚本保存到本地：${ps1Path}`);
+        } catch (e) {
+            logger.error('保存 PowerShell 安装脚本失败: ' + e);
+        }
+
         logger.trace('Server install command:', installServerScript);
 
         const installDir = `$HOME\\${vscodeServerConfig.serverDataFolderName}\\install`;
@@ -131,6 +142,15 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
         commandOutput = await conn.execPartial(command, (stdout: string) => endRegex.test(stdout));
     } else {
         const installServerScript = generateBashInstallScript(installOptions);
+
+        // 保存 Bash 安装脚本到本地，便于后续定位问题
+        try {
+            const shPath = path.join(process.cwd(), 'vscode-server-install.sh');
+            fs.writeFileSync(shPath, installServerScript, 'utf8');
+            logger.info(`已将 Bash 安装脚本保存到本地：${shPath}`);
+        } catch (e) {
+            logger.error('保存 Bash 安装脚本失败: ' + e);
+        }
 
         logger.trace('Server install command:', installServerScript);
         // Fish shell does not support heredoc so let's workaround it using -c option,
@@ -230,8 +250,11 @@ PLATFORM=
 
 # Mimic output from logs of remote-ssh extension
 print_install_results_and_exit() {
+    local code=$1
+    local msg=$2
     echo "${id}: start"
-    echo "exitCode==$1=="
+    echo "exitCode==$code=="
+    echo "errorMsg==${msg}=="
     echo "listeningOn==$LISTENING_ON=="
     echo "connectionToken==$SERVER_CONNECTION_TOKEN=="
     echo "logFile==$SERVER_LOGFILE=="
@@ -239,7 +262,7 @@ print_install_results_and_exit() {
     echo "arch==$ARCH=="
     echo "platform==$PLATFORM=="
     echo "tmpDir==$TMP_DIR=="
-    ${envVariables.map(envVar => `echo "${envVar}==$${envVar}=="`).join('\n')}
+    ${envVariables.map(envVar => `echo \"${envVar}==\$${envVar}==\"`).join('\n')}
     echo "${id}: end"
     exit 0
 }
@@ -261,7 +284,7 @@ case $KERNEL in
         ;;
     *)
         echo "Error platform not supported: $KERNEL"
-        print_install_results_and_exit 1
+        print_install_results_and_exit 1 "Error platform not supported: $KERNEL"
         ;;
 esac
 
@@ -291,7 +314,7 @@ case $ARCH in
         ;;
     *)
         echo "Error architecture not supported: $ARCH"
-        print_install_results_and_exit 1
+        print_install_results_and_exit 1 "Error architecture not supported: $ARCH"
         ;;
 esac
 
@@ -308,8 +331,8 @@ fi
 if [[ ! -d $SERVER_DIR ]]; then
     mkdir -p $SERVER_DIR
     if (( $? > 0 )); then
-        echo "Error creating server install directory"
-        print_install_results_and_exit 1
+        echo "Error creating server install directory: $SERVER_DIR"
+        print_install_results_and_exit 1 "Error creating server install directory: $SERVER_DIR"
     fi
 fi
 
@@ -320,6 +343,9 @@ fi
 
 SERVER_DOWNLOAD_URL="$(echo "${serverDownloadUrlTemplate.replace(/\$\{/g, '\\${')}" | sed "s/\\\${quality}/$DISTRO_QUALITY/g" | sed "s/\\\${version}/$DISTRO_VERSION/g" | sed "s/\\\${commit}/$DISTRO_COMMIT/g" | sed "s/\\\${os}/$PLATFORM/g" | sed "s/\\\${arch}/$SERVER_ARCH/g" | sed "s/\\\${release}/$DISTRO_VSCODIUM_RELEASE/g")"
 
+
+echo "SERVER_DOWNLOAD_URL: $SERVER_DOWNLOAD_URL"
+
 # Check if server script is already installed
 if [[ ! -f $SERVER_SCRIPT ]]; then
     case "$PLATFORM" in
@@ -327,7 +353,7 @@ if [[ ! -f $SERVER_SCRIPT ]]; then
             ;;
         *)
             echo "Error '$PLATFORM' needs manual installation of remote extension host"
-            print_install_results_and_exit 1
+            print_install_results_and_exit 1 "Error '$PLATFORM' needs manual installation of remote extension host"
             ;;
     esac
 
@@ -339,23 +365,23 @@ if [[ ! -f $SERVER_SCRIPT ]]; then
         curl --retry 3 --connect-timeout 10 --location --show-error --silent --output vscode-server.tar.gz $SERVER_DOWNLOAD_URL
     else
         echo "Error no tool to download server binary"
-        print_install_results_and_exit 1
+        print_install_results_and_exit 1 "Error no tool to download server binary"
     fi
 
     if (( $? > 0 )); then
         echo "Error downloading server from $SERVER_DOWNLOAD_URL"
-        print_install_results_and_exit 1
+        print_install_results_and_exit 1 "Error downloading server from $SERVER_DOWNLOAD_URL"
     fi
 
     tar -xf vscode-server.tar.gz --strip-components 1
     if (( $? > 0 )); then
         echo "Error while extracting server contents"
-        print_install_results_and_exit 1
+        print_install_results_and_exit 1 "Error while extracting server contents"
     fi
 
     if [[ ! -f $SERVER_SCRIPT ]]; then
         echo "Error server contents are corrupted"
-        print_install_results_and_exit 1
+        print_install_results_and_exit 1 "Error server contents are corrupted"
     fi
 
     rm -f vscode-server.tar.gz
@@ -396,7 +422,7 @@ if [[ -f $SERVER_TOKENFILE ]]; then
     SERVER_CONNECTION_TOKEN="$(cat $SERVER_TOKENFILE)"
 else
     echo "Error server token file not found $SERVER_TOKENFILE"
-    print_install_results_and_exit 1
+    print_install_results_and_exit 1 "Error server token file not found $SERVER_TOKENFILE"
 fi
 
 if [[ -f $SERVER_LOGFILE ]]; then
@@ -410,11 +436,11 @@ if [[ -f $SERVER_LOGFILE ]]; then
 
     if [[ -z $LISTENING_ON ]]; then
         echo "Error server did not start successfully"
-        print_install_results_and_exit 1
+        print_install_results_and_exit 1 "Error server did not start successfully"
     fi
 else
     echo "Error server log file not found $SERVER_LOGFILE"
-    print_install_results_and_exit 1
+    print_install_results_and_exit 1 "Error server log file not found $SERVER_LOGFILE"
 fi
 
 # Finish server setup
