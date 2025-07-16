@@ -254,7 +254,7 @@ print_install_results_and_exit() {
     local msg=$2
     echo "${id}: start"
     echo "exitCode==$code=="
-    echo "errorMsg==${msg}=="
+    echo "errorMsg==$2=="
     echo "listeningOn==$LISTENING_ON=="
     echo "connectionToken==$SERVER_CONNECTION_TOKEN=="
     echo "logFile==$SERVER_LOGFILE=="
