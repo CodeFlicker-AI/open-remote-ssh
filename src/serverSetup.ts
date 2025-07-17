@@ -268,9 +268,10 @@ function generateBashInstallScript({ id, quality, version, commit, release, exte
 GLIBC_URL="${GLIBC_URL}"
 GCC_URL="${GCC_URL}"
 PATCHELF_URL="${PATCHELF_URL}"
-INSTALL_DIR="/opt"
-
-cd $INSTALL_DIR
+# 依赖安装目录，使用用户目录，避免权限问题
+DEPS_DIR="$HOME/.vscode-server-deps"
+mkdir -p "$DEPS_DIR"
+cd "$DEPS_DIR"
 
 # 下载 glibc
 if [ ! -d "glibc-2.39" ]; then
@@ -286,21 +287,25 @@ if [ ! -d "gcc-14.2.0" ]; then
   rm gcc-14.2.0.tgz
 fi
 
-# 安装 patchelf
+# 安装 patchelf 到本地目录
 if ! command -v patchelf &> /dev/null; then
   if [ -n "$PATCHELF_URL" ]; then
     wget $PATCHELF_URL -O patchelf
     chmod +x patchelf
-    mv patchelf /usr/bin/patchelf
+    # 放到本地 bin 目录
+    mkdir -p "$DEPS_DIR/bin"
+    mv patchelf "$DEPS_DIR/bin/patchelf"
+    export PATH="$DEPS_DIR/bin:$PATH"
   else
-    yum install -y patchelf
+    echo "请手动安装 patchelf 或提供 PATCHELF_URL"
+    exit 1
   fi
 fi
 
-# 输出依赖路径，便于后续配置
-export VSCODE_SERVER_CUSTOM_GLIBC_LINKER="/opt/glibc-2.39/lib/ld-linux-x86-64.so.2"
-export VSCODE_SERVER_CUSTOM_GLIBC_PATH="/opt/glibc-2.39/lib:/opt/gcc-14.2.0/lib64:/lib64"
-export VSCODE_SERVER_PATCHELF_PATH="/usr/bin/patchelf"
+# 输出依赖路径
+export VSCODE_SERVER_CUSTOM_GLIBC_LINKER="$DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2"
+export VSCODE_SERVER_CUSTOM_GLIBC_PATH="$DEPS_DIR/glibc-2.39/lib:$DEPS_DIR/gcc-14.2.0/lib64:/lib64"
+export VSCODE_SERVER_PATCHELF_PATH="$DEPS_DIR/bin/patchelf"
 # ========== 依赖安装结束 ==========
 `;
     return `
