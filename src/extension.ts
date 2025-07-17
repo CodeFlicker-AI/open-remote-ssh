@@ -56,7 +56,6 @@ export async function activate(context: vscode.ExtensionContext) {
       const [host, _path] = locationData;
       // 2. 解析 SSH 配置，获取用户、端口、密钥等
       const SSHConfiguration = (await import('./ssh/sshConfig')).default;
-      const SSHDestination = (await import('./ssh/sshDestination')).default;
       const { gatherIdentityFiles } = await import('./ssh/identityFiles');
       const sshConfig = await SSHConfiguration.loadFromFS();
       const sshHostConfig = sshConfig.getHostConfiguration(host);
