@@ -274,26 +274,26 @@ cd $INSTALL_DIR
 
 # 下载 glibc
 if [ ! -d "glibc-2.39" ]; then
-  sudo wget $GLIBC_URL -O glibc-2.39.tar.gz
-  sudo tar xzf glibc-2.39.tar.gz
-  sudo rm glibc-2.39.tar.gz
+  wget $GLIBC_URL -O glibc-2.39.tar.gz
+  tar xzf glibc-2.39.tar.gz
+  rm glibc-2.39.tar.gz
 fi
 
 # 下载 gcc
 if [ ! -d "gcc-14.2.0" ]; then
-  sudo wget $GCC_URL -O gcc-14.2.0.tgz
-  sudo tar xzvf gcc-14.2.0.tgz
-  sudo rm gcc-14.2.0.tgz
+  wget $GCC_URL -O gcc-14.2.0.tgz
+  tar xzvf gcc-14.2.0.tgz
+  rm gcc-14.2.0.tgz
 fi
 
 # 安装 patchelf
 if ! command -v patchelf &> /dev/null; then
   if [ -n "$PATCHELF_URL" ]; then
-    sudo wget $PATCHELF_URL -O patchelf
-    sudo chmod +x patchelf
-    sudo mv patchelf /usr/bin/patchelf
+    wget $PATCHELF_URL -O patchelf
+    chmod +x patchelf
+    mv patchelf /usr/bin/patchelf
   else
-    sudo yum install -y patchelf
+    yum install -y patchelf
   fi
 fi
 
