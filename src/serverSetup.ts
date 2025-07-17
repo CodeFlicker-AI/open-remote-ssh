@@ -261,7 +261,7 @@ function generateBashInstallScript({ id, quality, version, commit, release, exte
     // 依赖下载地址优先用参数，否则用默认
     const GLIBC_URL = glibcUrl || 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/glibc-2.39.tar.gz';
     const GCC_URL = gccUrl || 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/gcc-14.2.0.tgz';
-    const PATCHELF_URL = patchelfUrl || '';
+    const PATCHELF_URL = patchelfUrl || 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/patchelf';
     // 新增：GLIBC 相关依赖自动下载安装脚本片段
     const glibcInstallScript = `
 # ========== 自动下载安装 glibc 及相关依赖 ==========
