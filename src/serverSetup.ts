@@ -17,6 +17,10 @@ export interface ServerInstallOptions {
     serverApplicationName: string;
     serverDataFolderName: string;
     serverDownloadUrlTemplate: string;
+    // 新增 glibc 相关依赖参数
+    glibcUrl?: string;
+    gccUrl?: string;
+    patchelfUrl?: string;
 }
 
 export interface ServerInstallResult {
@@ -72,6 +76,11 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
     const scriptId = crypto.randomBytes(12).toString('hex');
 
     const vscodeServerConfig = await getVSCodeServerConfig();
+    // 获取 remote.SSH 配置
+    const remoteSSHconfig = require('vscode').workspace.getConfiguration('remote.SSH');
+    const glibcUrl = remoteSSHconfig.get('customGlibcUrl', 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/glibc-2.39.tar.gz');
+    const gccUrl = remoteSSHconfig.get('customGccUrl', 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/gcc-14.2.0.tgz');
+    const patchelfUrl = remoteSSHconfig.get('customPatchelfUrl', '');
     const installOptions: ServerInstallOptions = {
         id: scriptId,
         version: vscodeServerConfig.version,
@@ -84,6 +93,10 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
         serverApplicationName: vscodeServerConfig.serverApplicationName,
         serverDataFolderName: vscodeServerConfig.serverDataFolderName,
         serverDownloadUrlTemplate: serverDownloadUrlTemplate || vscodeServerConfig.serverDownloadUrlTemplate || DEFAULT_DOWNLOAD_URL_TEMPLATE,
+        // 依赖下载地址从 remote.SSH 配置读取
+        glibcUrl,
+        gccUrl,
+        patchelfUrl,
     };
 
     let commandOutput: { stdout: string; stderr: string };
@@ -192,6 +205,31 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
     };
 }
 
+/**
+ * 删除远程主机上所有 server 相关目录（彻底清理）
+ * @param conn SSH 连接实例
+ * @param logger 日志实例
+ */
+export async function deleteRemoteServerDirs(conn: SSHConnection, logger: Log): Promise<void> {
+    const vscodeServerConfig = await getVSCodeServerConfig();
+    // 远程 server 目录（如 $HOME/.vscode-server、$HOME/.vscode-remote、$HOME/.vscode-oss-server 等）
+    const folderNames = [
+        vscodeServerConfig.serverDataFolderName,
+    ];
+    for (const folder of folderNames) {
+        // 支持多种 shell，兼容性更好
+        const cmd = `rm -rf $HOME/${folder}`;
+        logger.info(`[Server清理] 执行远程命令: ${cmd}`);
+        try {
+            const { stdout, stderr } = await conn.exec(cmd);
+            if (stdout) {logger.trace(`[Server清理][stdout] ${stdout}`);}
+            if (stderr) {logger.trace(`[Server清理][stderr] ${stderr}`);}
+        } catch (e) {
+            logger.error(`[Server清理] 删除 $HOME/${folder} 失败`, e);
+        }
+    }
+}
+
 function parseServerInstallOutput(str: string, scriptId: string): { [k: string]: string } | undefined {
     const startResultStr = `${scriptId}: start`;
     const endResultStr = `${scriptId}: end`;
@@ -218,12 +256,59 @@ function parseServerInstallOutput(str: string, scriptId: string): { [k: string]:
     return resultMap;
 }
 
-function generateBashInstallScript({ id, quality, version, commit, release, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, serverDownloadUrlTemplate }: ServerInstallOptions) {
+function generateBashInstallScript({ id, quality, version, commit, release, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, serverDownloadUrlTemplate, glibcUrl, gccUrl, patchelfUrl }: ServerInstallOptions) {
     const extensions = extensionIds.map(id => '--install-extension ' + id).join(' ');
+    // 依赖下载地址优先用参数，否则用默认
+    const GLIBC_URL = glibcUrl || 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/glibc-2.39.tar.gz';
+    const GCC_URL = gccUrl || 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/gcc-14.2.0.tgz';
+    const PATCHELF_URL = patchelfUrl || '';
+    // 新增：GLIBC 相关依赖自动下载安装脚本片段
+    const glibcInstallScript = `
+# ========== 自动下载安装 glibc 及相关依赖 ==========
+GLIBC_URL="${GLIBC_URL}"
+GCC_URL="${GCC_URL}"
+PATCHELF_URL="${PATCHELF_URL}"
+INSTALL_DIR="/opt"
+
+cd $INSTALL_DIR
+
+# 下载 glibc
+if [ ! -d "glibc-2.39" ]; then
+  sudo wget $GLIBC_URL -O glibc-2.39.tar.gz
+  sudo tar xzf glibc-2.39.tar.gz
+  sudo rm glibc-2.39.tar.gz
+fi
+
+# 下载 gcc
+if [ ! -d "gcc-14.2.0" ]; then
+  sudo wget $GCC_URL -O gcc-14.2.0.tgz
+  sudo tar xzvf gcc-14.2.0.tgz
+  sudo rm gcc-14.2.0.tgz
+fi
+
+# 安装 patchelf
+if ! command -v patchelf &> /dev/null; then
+  if [ -n "$PATCHELF_URL" ]; then
+    sudo wget $PATCHELF_URL -O patchelf
+    sudo chmod +x patchelf
+    sudo mv patchelf /usr/bin/patchelf
+  else
+    sudo yum install -y patchelf
+  fi
+fi
+
+# 输出依赖路径，便于后续配置
+export VSCODE_SERVER_CUSTOM_GLIBC_LINKER="/opt/glibc-2.39/lib/ld-linux-x86-64.so.2"
+export VSCODE_SERVER_CUSTOM_GLIBC_PATH="/opt/glibc-2.39/lib:/opt/gcc-14.2.0/lib64:/lib64"
+export VSCODE_SERVER_PATCHELF_PATH="/usr/bin/patchelf"
+# ========== 依赖安装结束 ==========
+`;
     return `
 # Server installation script
 
-TMP_DIR="\${XDG_RUNTIME_DIR:-"/tmp"}"
+${glibcInstallScript}
+
+TMP_DIR="\${XDG_RUNTIME_DIR:-\"/tmp\"}"
 
 DISTRO_VERSION="${version}"
 DISTRO_COMMIT="${commit}"
@@ -232,7 +317,7 @@ DISTRO_VSCODIUM_RELEASE="${release ?? ''}"
 
 SERVER_APP_NAME="${serverApplicationName}"
 SERVER_INITIAL_EXTENSIONS="${extensions}"
-SERVER_LISTEN_FLAG="${useSocketPath ? `--socket-path="$TMP_DIR/vscode-server-sock-${crypto.randomUUID()}"` : '--port=0'}"
+SERVER_LISTEN_FLAG="${useSocketPath ? `--socket-path=\"$TMP_DIR/vscode-server-sock-${crypto.randomUUID()}\"` : '--port=0'}"
 SERVER_DATA_DIR="$HOME/${serverDataFolderName}"
 SERVER_DIR="$SERVER_DATA_DIR/bin/$DISTRO_COMMIT"
 SERVER_SCRIPT="$SERVER_DIR/bin/$SERVER_APP_NAME"

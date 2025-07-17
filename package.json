@@ -103,6 +103,26 @@
 					"description": "**Experimental:** The name of the server binary, use this **only if** you are using a client without a corresponding server release",
 					"scope": "application",
 					"default": ""
+				},
+				"openRemoteSsh.enableCustomGlibc": {
+					"type": "boolean",
+					"default": true,
+					"description": "启用自定义 glibc 依赖注入"
+				},
+				"openRemoteSsh.customGlibcLinkerPath": {
+					"type": "string",
+					"default": "",
+					"description": "自定义 glibc linker 路径"
+				},
+				"openRemoteSsh.customGlibcLibPath": {
+					"type": "string",
+					"default": "",
+					"description": "自定义 glibc lib 路径"
+				},
+				"openRemoteSsh.customPatchelfPath": {
+					"type": "string",
+					"default": "",
+					"description": "自定义 patchelf 路径"
 				}
 			}
 		},
