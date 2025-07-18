@@ -80,9 +80,9 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
     const vscodeServerConfig = await getVSCodeServerConfig();
     // 获取 remote.SSH 配置
     const remoteSSHconfig = require('vscode').workspace.getConfiguration('remote.SSH');
-    const glibcUrl = remoteSSHconfig.get('customGlibcUrl', 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/glibc-2.39.tar.gz');
-    const gccUrl = remoteSSHconfig.get('customGccUrl', 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/gcc-14.2.0.tgz');
-    const patchelfUrl = remoteSSHconfig.get('customPatchelfUrl', '');
+    const glibcUrl = remoteSSHconfig.get('customGlibcUrl');
+    const gccUrl = remoteSSHconfig.get('customGccUrl');
+    const patchelfUrl = remoteSSHconfig.get('customPatchelfUrl');
     let enableCustomGlibc = remoteSSHconfig.get('enableCustomGlibc', false);
     
     // 检查 CLOUDDEV_CONTAINER 环境变量，如果存在则禁用自定义 glibc 注入
