@@ -83,13 +83,10 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
     const glibcUrl = remoteSSHconfig.get('customGlibcUrl');
     const gccUrl = remoteSSHconfig.get('customGccUrl');
     const patchelfUrl = remoteSSHconfig.get('customPatchelfUrl');
-    let enableCustomGlibc = remoteSSHconfig.get('enableCustomGlibc', false);
+    let enableCustomGlibc = remoteSSHconfig.get('enableCustomGlibc');
     
-    // 检查 CLOUDDEV_CONTAINER 环境变量，如果存在则禁用自定义 glibc 注入
-    if (process.env.CLOUDDEV_CONTAINER) {
-        logger.info('检测到 CLOUDDEV_CONTAINER 环境变量，禁用自定义 glibc 注入');
-        enableCustomGlibc = false;
-    }
+    // 注意：CLOUDDEV_CONTAINER 环境变量检查已在远程服务器安装脚本中实现
+    // 本地客户端不需要检查此环境变量，因为该变量应该表示远程服务器的环境
     const installOptions: ServerInstallOptions = {
         id: scriptId,
         version: vscodeServerConfig.version,

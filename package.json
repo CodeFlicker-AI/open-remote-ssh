@@ -109,17 +109,17 @@
 					"default": true,
 					"description": "启用自定义 glibc 依赖注入"
 				},
-				"remote.SSH.customGlibcLinkerPath": {
+				"remote.SSH.customGlibcUrl": {
 					"type": "string",
 					"default": "https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/glibc-2.39/xinchenghua-public_glibc-2.39.tar.gz",
 					"description": "自定义 glibc linker 路径"
 				},
-				"remote.SSH.customGlibcLibPath": {
+				"remote.SSH.customGccUrl": {
 					"type": "string",
 					"default": "https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/glibc-2.39/xinchenghua-public_gcc-14.2.0.tgz",
 					"description": "自定义 glibc lib 路径"
 				},
-				"remote.SSH.customPatchelfPath": {
+				"remote.SSH.customPatchelfUrl": {
 					"type": "string",
 					"default": "https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/glibc-2.39/xinchenghua-public_patchelf",
 					"description": "自定义 patchelf 路径"
