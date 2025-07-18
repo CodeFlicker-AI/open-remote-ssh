@@ -34,6 +34,17 @@ function logConfigurationChange(e: vscode.ConfigurationChangeEvent, logger: Log)
   }
 }
 
+// 获取当前 GLIBC 相关配置的快照
+function getCurrentGlibcConfig() {
+  const config = vscode.workspace.getConfiguration('remote.SSH');
+  return {
+    enableCustomGlibc: config.get('enableCustomGlibc'),
+    customGlibcUrl: config.get('customGlibcUrl'),
+    customGccUrl: config.get('customGccUrl'),
+    customPatchelfUrl: config.get('customPatchelfUrl'),
+  };
+}
+
 export async function activate(context: vscode.ExtensionContext) {
     const logger = new Log('Remote - SSH');
     context.subscriptions.push(logger);
@@ -58,13 +69,20 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.showLog', () => logger.show()));
 
     // 监听 GLIBC 相关配置变更，变更后记录标志，重启后自动触发 server 重新安装
-    vscode.workspace.onDidChangeConfiguration(e => {
+    vscode.workspace.onDidChangeConfiguration(async e => {
       // 添加调试日志
       logConfigurationChange(e, logger);
       
       if (isGlibcConfigChanged(e)) {
-        context.globalState.update('openRemoteSsh.needReinstallServer', true);
-        vscode.window.showInformationMessage('GLIBC 相关配置已变更，重启 VSCode 后将自动重新安装 server。');
+        const lastConfig = context.globalState.get<any>('openRemoteSsh.lastGlibcConfig');
+        const currentConfig = getCurrentGlibcConfig();
+        if (!lastConfig || JSON.stringify(lastConfig) !== JSON.stringify(currentConfig)) {
+          await context.globalState.update('openRemoteSsh.needReinstallServer', true);
+          await context.globalState.update('openRemoteSsh.lastGlibcConfig', currentConfig);
+          vscode.window.showInformationMessage('GLIBC 相关配置已变更，重启 VSCode 后将自动重新安装 server。');
+        } else {
+          logger.info('GLIBC 配置变更事件触发，但配置值未发生实际变化。');
+        }
       }
     });
 }
