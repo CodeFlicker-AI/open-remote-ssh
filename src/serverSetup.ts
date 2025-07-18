@@ -85,8 +85,17 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
     const patchelfUrl = remoteSSHconfig.get('customPatchelfUrl');
     let enableCustomGlibc = remoteSSHconfig.get('enableCustomGlibc');
     
-    // 注意：CLOUDDEV_CONTAINER 环境变量检查已在远程服务器安装脚本中实现
-    // 本地客户端不需要检查此环境变量，因为该变量应该表示远程服务器的环境
+    // 检查远程服务器的 CLOUDDEV_CONTAINER 环境变量
+    // 如果远程服务器设置了 CLOUDDEV_CONTAINER 环境变量，则自动禁用 glibc 安装
+    try {
+        const clouddevResult = await conn.exec('echo $CLOUDDEV_CONTAINER');
+        if (clouddevResult.stdout && clouddevResult.stdout.trim()) {
+            logger.info(`检测到远程服务器 CLOUDDEV_CONTAINER 环境变量: ${clouddevResult.stdout.trim()}`);
+            enableCustomGlibc = false;
+        }
+    } catch (e) {
+        logger.trace('检查 CLOUDDEV_CONTAINER 环境变量失败:', e);
+    }
     const installOptions: ServerInstallOptions = {
         id: scriptId,
         version: vscodeServerConfig.version,
@@ -275,9 +284,12 @@ function generateBashInstallScript({ id, quality, version, commit, release, exte
     // 同时检查 CLOUDDEV_CONTAINER 环境变量，如果存在则跳过 glibc 安装
     const glibcInstallScript = enableCustomGlibc ? `
 # ========== 自动下载安装 glibc 及相关依赖 ==========
+echo "enableCustomGlibc: ${enableCustomGlibc}"
+echo "CLOUDDEV_CONTAINER 环境变量检查: $CLOUDDEV_CONTAINER"
 # 检查 CLOUDDEV_CONTAINER 环境变量，如果存在则跳过 glibc 安装
 if [ -n "$CLOUDDEV_CONTAINER" ]; then
   echo "检测到 CLOUDDEV_CONTAINER 环境变量，跳过自定义 glibc 注入"
+  echo "CLOUDDEV_CONTAINER 值: $CLOUDDEV_CONTAINER"
 else
   GLIBC_URL="${GLIBC_URL}"
   GCC_URL="${GCC_URL}"
