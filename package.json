@@ -2,7 +2,7 @@
 	"name": "open-remote-ssh",
 	"displayName": "Open Remote - SSH",
 	"description": "Use any remote machine with a SSH server as your development environment.",
-	"version": "0.0.54",
+	"version": "0.0.55",
 	"publisher": "jeanp413",
 	"repository": {
 		"type": "git",
@@ -104,24 +104,24 @@
 					"scope": "application",
 					"default": ""
 				},
-				"openRemoteSsh.enableCustomGlibc": {
+				"remote.SSH.enableCustomGlibc": {
 					"type": "boolean",
 					"default": true,
 					"description": "启用自定义 glibc 依赖注入"
 				},
-				"openRemoteSsh.customGlibcLinkerPath": {
+				"remote.SSH.customGlibcLinkerPath": {
 					"type": "string",
-					"default": "",
+					"default": "https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/glibc-2.39/xinchenghua-public_glibc-2.39.tar.gz",
 					"description": "自定义 glibc linker 路径"
 				},
-				"openRemoteSsh.customGlibcLibPath": {
+				"remote.SSH.customGlibcLibPath": {
 					"type": "string",
-					"default": "",
+					"default": "https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/glibc-2.39/xinchenghua-public_gcc-14.2.0.tgz",
 					"description": "自定义 glibc lib 路径"
 				},
-				"openRemoteSsh.customPatchelfPath": {
+				"remote.SSH.customPatchelfPath": {
 					"type": "string",
-					"default": "",
+					"default": "https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/glibc-2.39/xinchenghua-public_patchelf",
 					"description": "自定义 patchelf 路径"
 				}
 			}

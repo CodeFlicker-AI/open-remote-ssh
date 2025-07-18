@@ -21,6 +21,8 @@ export interface ServerInstallOptions {
     glibcUrl?: string;
     gccUrl?: string;
     patchelfUrl?: string;
+    // 新增：控制是否启用自定义 glibc 安装
+    enableCustomGlibc?: boolean;
 }
 
 export interface ServerInstallResult {
@@ -81,6 +83,13 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
     const glibcUrl = remoteSSHconfig.get('customGlibcUrl', 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/glibc-2.39.tar.gz');
     const gccUrl = remoteSSHconfig.get('customGccUrl', 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/gcc-14.2.0.tgz');
     const patchelfUrl = remoteSSHconfig.get('customPatchelfUrl', '');
+    let enableCustomGlibc = remoteSSHconfig.get('enableCustomGlibc', false);
+    
+    // 检查 CLOUDDEV_CONTAINER 环境变量，如果存在则禁用自定义 glibc 注入
+    if (process.env.CLOUDDEV_CONTAINER) {
+        logger.info('检测到 CLOUDDEV_CONTAINER 环境变量，禁用自定义 glibc 注入');
+        enableCustomGlibc = false;
+    }
     const installOptions: ServerInstallOptions = {
         id: scriptId,
         version: vscodeServerConfig.version,
@@ -97,6 +106,8 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
         glibcUrl,
         gccUrl,
         patchelfUrl,
+        // 控制是否启用自定义 glibc 安装
+        enableCustomGlibc,
     };
 
     let commandOutput: { stdout: string; stderr: string };
@@ -256,58 +267,66 @@ function parseServerInstallOutput(str: string, scriptId: string): { [k: string]:
     return resultMap;
 }
 
-function generateBashInstallScript({ id, quality, version, commit, release, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, serverDownloadUrlTemplate, glibcUrl, gccUrl, patchelfUrl }: ServerInstallOptions) {
+function generateBashInstallScript({ id, quality, version, commit, release, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, serverDownloadUrlTemplate, glibcUrl, gccUrl, patchelfUrl, enableCustomGlibc }: ServerInstallOptions) {
     const extensions = extensionIds.map(id => '--install-extension ' + id).join(' ');
     // 依赖下载地址优先用参数，否则用默认
-    const GLIBC_URL = glibcUrl || 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/glibc-2.39.tar.gz';
-    const GCC_URL = gccUrl || 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/gcc-14.2.0.tgz';
-    const PATCHELF_URL = patchelfUrl || 'https://halo.corp.kuaishou.com/api/cloud-storage/v1/public-objects/xinchenghua-public/patchelf';
-    // 新增：GLIBC 相关依赖自动下载安装脚本片段
-    const glibcInstallScript = `
+    const GLIBC_URL = glibcUrl || '';
+    const GCC_URL = gccUrl || '';
+    const PATCHELF_URL = patchelfUrl || '';
+    
+    // 根据 enableCustomGlibc 参数决定是否包含 glibc 安装脚本
+    // 同时检查 CLOUDDEV_CONTAINER 环境变量，如果存在则跳过 glibc 安装
+    const glibcInstallScript = enableCustomGlibc ? `
 # ========== 自动下载安装 glibc 及相关依赖 ==========
-GLIBC_URL="${GLIBC_URL}"
-GCC_URL="${GCC_URL}"
-PATCHELF_URL="${PATCHELF_URL}"
-# 依赖安装目录，使用用户目录，避免权限问题
-DEPS_DIR="$HOME/.vscode-server-deps"
-mkdir -p "$DEPS_DIR"
-cd "$DEPS_DIR"
+# 检查 CLOUDDEV_CONTAINER 环境变量，如果存在则跳过 glibc 安装
+if [ -n "$CLOUDDEV_CONTAINER" ]; then
+  echo "检测到 CLOUDDEV_CONTAINER 环境变量，跳过自定义 glibc 注入"
+else
+  GLIBC_URL="${GLIBC_URL}"
+  GCC_URL="${GCC_URL}"
+  PATCHELF_URL="${PATCHELF_URL}"
+  # 依赖安装目录，使用用户目录，避免权限问题
+  DEPS_DIR="$HOME/.vscode-server-deps"
+  mkdir -p "$DEPS_DIR"
+  cd "$DEPS_DIR"
 
-# 下载 glibc
-if [ ! -d "glibc-2.39" ]; then
-  wget $GLIBC_URL -O glibc-2.39.tar.gz
-  tar xzf glibc-2.39.tar.gz
-  rm glibc-2.39.tar.gz
-fi
-
-# 下载 gcc
-if [ ! -d "gcc-14.2.0" ]; then
-  wget $GCC_URL -O gcc-14.2.0.tgz
-  tar xzvf gcc-14.2.0.tgz
-  rm gcc-14.2.0.tgz
-fi
-
-# 安装 patchelf 到本地目录
-if ! command -v patchelf &> /dev/null; then
-  if [ -n "$PATCHELF_URL" ]; then
-    wget $PATCHELF_URL -O patchelf
-    chmod +x patchelf
-    # 放到本地 bin 目录
-    mkdir -p "$DEPS_DIR/bin"
-    mv patchelf "$DEPS_DIR/bin/patchelf"
-    export PATH="$DEPS_DIR/bin:$PATH"
-  else
-    echo "请手动安装 patchelf 或提供 PATCHELF_URL"
-    exit 1
+  # 下载 glibc
+  if [ ! -d "glibc-2.39" ]; then
+    wget $GLIBC_URL -O glibc-2.39.tar.gz
+    tar xzf glibc-2.39.tar.gz
+    rm glibc-2.39.tar.gz
   fi
-fi
 
-# 输出依赖路径
-export VSCODE_SERVER_CUSTOM_GLIBC_LINKER="$DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2"
-export VSCODE_SERVER_CUSTOM_GLIBC_PATH="$DEPS_DIR/glibc-2.39/lib:$DEPS_DIR/gcc-14.2.0/lib64:/lib64"
-export VSCODE_SERVER_PATCHELF_PATH="$DEPS_DIR/bin/patchelf"
+  # 下载 gcc
+  if [ ! -d "gcc-14.2.0" ]; then
+    wget $GCC_URL -O gcc-14.2.0.tgz
+    tar xzvf gcc-14.2.0.tgz
+    rm gcc-14.2.0.tgz
+  fi
+
+  # 安装 patchelf 到本地目录
+  if ! command -v patchelf &> /dev/null; then
+    if [ -n "$PATCHELF_URL" ]; then
+      wget $PATCHELF_URL -O patchelf
+      chmod +x patchelf
+      # 放到本地 bin 目录
+      mkdir -p "$DEPS_DIR/bin"
+      mv patchelf "$DEPS_DIR/bin/patchelf"
+      export PATH="$DEPS_DIR/bin:$PATH"
+    else
+      echo "请手动安装 patchelf 或提供 PATCHELF_URL"
+      exit 1
+    fi
+  fi
+
+  # 输出依赖路径
+  export VSCODE_SERVER_CUSTOM_GLIBC_LINKER="$DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2"
+  export VSCODE_SERVER_CUSTOM_GLIBC_PATH="$DEPS_DIR/glibc-2.39/lib:$DEPS_DIR/gcc-14.2.0/lib64:/lib64"
+  export VSCODE_SERVER_PATCHELF_PATH="$DEPS_DIR/bin/patchelf"
+fi
 # ========== 依赖安装结束 ==========
-`;
+` : '';
+    
     return `
 # Server installation script
 
@@ -538,7 +557,7 @@ print_install_results_and_exit 0
 `;
 }
 
-function generatePowerShellInstallScript({ id, quality, version, commit, release, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, serverDownloadUrlTemplate }: ServerInstallOptions) {
+function generatePowerShellInstallScript({ id, quality, version, commit, release, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, serverDownloadUrlTemplate, enableCustomGlibc }: ServerInstallOptions) {
     const extensions = extensionIds.map(id => '--install-extension ' + id).join(' ');
     const downloadUrl = serverDownloadUrlTemplate
         .replace(/\$\{quality\}/g, quality)
@@ -547,6 +566,12 @@ function generatePowerShellInstallScript({ id, quality, version, commit, release
         .replace(/\$\{os\}/g, 'win32')
         .replace(/\$\{arch\}/g, 'x64')
         .replace(/\$\{release\}/g, release ?? '');
+
+    // 注意：enableCustomGlibc 功能在 Windows 环境下暂不支持
+    // 因为 glibc 是 Linux 系统的 C 标准库，Windows 使用不同的运行时库
+    if (enableCustomGlibc) {
+        console.warn('enableCustomGlibc 功能在 Windows 环境下暂不支持，将忽略此设置');
+    }
 
     return `
 # Server installation script

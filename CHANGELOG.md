@@ -1,3 +1,7 @@
+## 0.0.55
+- 新增 CLOUDDEV_CONTAINER 环境变量检测功能，当检测到该环境变量存在时自动禁用自定义 glibc 注入
+- 优化云开发容器环境的兼容性，避免不必要的依赖安装
+
 ## 0.0.48
 - Support `%n` in ProxyCommand
 - fix: add missing direct @types/ssh2-stream dependency (#177)

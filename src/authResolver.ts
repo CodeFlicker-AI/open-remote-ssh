@@ -191,7 +191,26 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                     envVariables['SSH_AUTH_SOCK'] = null;
                 }
 
+                // 检查是否需要重新安装服务器（GLIBC 配置变更后）
+                const needReinstallServer = this.context.globalState.get('openRemoteSsh.needReinstallServer');
+                if (needReinstallServer) {
+                    this.logger.info('检测到 GLIBC 配置变更，需要重新安装远程服务器');
+                    vscode.window.showInformationMessage('检测到 GLIBC 配置变更，重新安装远程 server 以应用 GLIBC 相关配置...');
+                    
+                    // 删除所有 server 相关目录
+                    const { deleteRemoteServerDirs } = await import('./serverSetup');
+                    await deleteRemoteServerDirs(this.sshConnection, this.logger);
+                    
+                    // 重置重新安装标志位
+                    this.context.globalState.update('openRemoteSsh.needReinstallServer', false);
+                }
+
                 const installResult = await installCodeServer(this.sshConnection, serverDownloadUrlTemplate, defaultExtensions, Object.keys(envVariables), remotePlatformMap[sshDest.hostname], remoteServerListenOnSocket, this.logger);
+
+                // 如果之前进行了重新安装，显示完成提示
+                if (needReinstallServer) {
+                    vscode.window.showInformationMessage('远程 server 重新安装完成，GLIBC 相关配置已应用。');
+                }
 
                 for (const key of Object.keys(envVariables)) {
                     if (installResult[key] !== undefined) {
