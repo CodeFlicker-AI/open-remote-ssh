@@ -88,10 +88,22 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
     // 检查远程服务器的 CLOUDDEV_CONTAINER 环境变量
     // 如果远程服务器设置了 CLOUDDEV_CONTAINER 环境变量，则自动禁用 glibc 安装
     try {
+        // 首先检查环境变量
         const clouddevResult = await conn.exec('echo $CLOUDDEV_CONTAINER');
         if (clouddevResult.stdout && clouddevResult.stdout.trim()) {
             logger.info(`检测到远程服务器 CLOUDDEV_CONTAINER 环境变量: ${clouddevResult.stdout.trim()}`);
             enableCustomGlibc = false;
+        } else {
+            // 如果环境变量不存在，检查 /home/clouddev/.preference.env.zsh 文件
+            const preferenceFileResult = await conn.exec('test -f /home/clouddev/.preference.env.zsh && echo "exists" || echo "not_exists"');
+            if (preferenceFileResult.stdout && preferenceFileResult.stdout.trim() === 'exists') {
+                // 检查文件中是否包含 CLOUDDEV_CONTAINER
+                const clouddevInFileResult = await conn.exec('grep -q "CLOUDDEV_CONTAINER" /home/clouddev/.preference.env.zsh && echo "found" || echo "not_found"');
+                if (clouddevInFileResult.stdout && clouddevInFileResult.stdout.trim() === 'found') {
+                    logger.info('检测到 /home/clouddev/.preference.env.zsh 文件中包含 CLOUDDEV_CONTAINER 配置');
+                    enableCustomGlibc = false;
+                }
+            }
         }
     } catch (e) {
         logger.trace('检查 CLOUDDEV_CONTAINER 环境变量失败:', e);
@@ -286,10 +298,12 @@ function generateBashInstallScript({ id, quality, version, commit, release, exte
 # ========== 自动下载安装 glibc 及相关依赖 ==========
 echo "enableCustomGlibc: ${enableCustomGlibc}"
 echo "CLOUDDEV_CONTAINER 环境变量检查: $CLOUDDEV_CONTAINER"
-# 检查 CLOUDDEV_CONTAINER 环境变量，如果存在则跳过 glibc 安装
+# 检查 CLOUDDEV_CONTAINER 环境变量或配置文件，如果存在则跳过 glibc 安装
 if [ -n "$CLOUDDEV_CONTAINER" ]; then
   echo "检测到 CLOUDDEV_CONTAINER 环境变量，跳过自定义 glibc 注入"
   echo "CLOUDDEV_CONTAINER 值: $CLOUDDEV_CONTAINER"
+elif [ -f "/home/clouddev/.preference.env.zsh" ] && grep -q "CLOUDDEV_CONTAINER" "/home/clouddev/.preference.env.zsh"; then
+  echo "检测到 /home/clouddev/.preference.env.zsh 文件中包含 CLOUDDEV_CONTAINER 配置，跳过自定义 glibc 注入"
 else
   GLIBC_URL="${GLIBC_URL}"
   GCC_URL="${GCC_URL}"

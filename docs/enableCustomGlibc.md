@@ -51,6 +51,12 @@
 
 当检测到 `CLOUDDEV_CONTAINER` 环境变量存在时，无论 `enableCustomGlibc` 设置如何，都会自动禁用自定义 glibc 注入。这个功能主要用于云开发容器环境，避免不必要的依赖安装。
 
+**检查逻辑**：
+1. 首先检查 `CLOUDDEV_CONTAINER` 环境变量是否存在
+2. 如果环境变量不存在，检查 `/home/clouddev/.preference.env.zsh` 文件是否存在
+3. 如果文件存在，检查文件中是否包含 `CLOUDDEV_CONTAINER` 配置
+4. 如果任一条件满足，则跳过 glibc 安装
+
 ## 支持的平台
 
 - **Linux**：完全支持，包括 Alpine Linux
@@ -70,7 +76,7 @@
 1. **Windows 系统**：Windows 不使用 glibc
 2. **macOS 系统**：macOS 使用不同的系统库
 3. **系统已是最新版本**：如果系统 glibc 版本已经足够新
-4. **云开发容器环境**：设置了 `CLOUDDEV_CONTAINER` 环境变量的容器环境会自动跳过 glibc 安装
+4. **云开发容器环境**：设置了 `CLOUDDEV_CONTAINER` 环境变量或在 `/home/clouddev/.preference.env.zsh` 文件中包含该配置的容器环境会自动跳过 glibc 安装
 
 ## 注意事项
 
