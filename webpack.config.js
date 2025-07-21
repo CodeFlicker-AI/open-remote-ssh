@@ -33,12 +33,20 @@ const config = {
 			}]
 		}]
 	},
+	// 添加node选项来处理Node.js全局对象
+	node: {
+		global: false,
+	},
 	plugins: [
 		new webpack.IgnorePlugin({
 			resourceRegExp: /crypto\/build\/Release\/sshcrypto\.node$/,
 		}),
 		new webpack.IgnorePlugin({
 			resourceRegExp: /cpu-features/,
+		}),
+		// 为全局对象提供 polyfill 以解决 navigator 错误
+		new webpack.DefinePlugin({
+			'typeof navigator': '"undefined"'
 		})
 	]
 }
