@@ -298,6 +298,7 @@ function generateBashInstallScript({ id, quality, version, commit, release, exte
 # ========== 自动下载安装 glibc 及相关依赖 ==========
 echo "enableCustomGlibc: ${enableCustomGlibc}"
 echo "CLOUDDEV_CONTAINER 环境变量检查: $CLOUDDEV_CONTAINER"
+
 # 检查 CLOUDDEV_CONTAINER 环境变量或配置文件，如果存在则跳过 glibc 安装
 if [ -n "$CLOUDDEV_CONTAINER" ]; then
   echo "检测到 CLOUDDEV_CONTAINER 环境变量，跳过自定义 glibc 注入"
@@ -305,9 +306,29 @@ if [ -n "$CLOUDDEV_CONTAINER" ]; then
 elif [ -f "/home/clouddev/.preference.env.zsh" ] && grep -q "CLOUDDEV_CONTAINER" "/home/clouddev/.preference.env.zsh"; then
   echo "检测到 /home/clouddev/.preference.env.zsh 文件中包含 CLOUDDEV_CONTAINER 配置，跳过自定义 glibc 注入"
 else
+  # 检查系统 libstdc++.so.6 版本兼容性
+  echo "检查系统 libstdc++.so.6 版本兼容性..."
+  if [ -f "/lib64/libstdc++.so.6" ]; then
+    CXXABI_VERSIONS=$(strings /lib64/libstdc++.so.6 | grep CXXABI | sort -V | tail -1)
+    echo "当前系统支持的 CXXABI 最高版本: $CXXABI_VERSIONS"
+    
+    # 检查是否支持 CXXABI_1.3.8
+    if ! strings /lib64/libstdc++.so.6 | grep -q "CXXABI_1.3.8"; then
+      echo "警告: 系统 libstdc++.so.6 不支持 CXXABI_1.3.8，需要下载兼容版本"
+      NEED_LIBSTDCXX=true
+    else
+      echo "系统 libstdc++.so.6 已支持 CXXABI_1.3.8"
+      NEED_LIBSTDCXX=false
+    fi
+  else
+    echo "警告: 未找到系统 libstdc++.so.6，需要下载兼容版本"
+    NEED_LIBSTDCXX=true
+  fi
+
   GLIBC_URL="${GLIBC_URL}"
   GCC_URL="${GCC_URL}"
   PATCHELF_URL="${PATCHELF_URL}"
+  
   # 依赖安装目录，使用用户目录，避免权限问题
   DEPS_DIR="$HOME/.vscode-server-deps"
   mkdir -p "$DEPS_DIR"
@@ -315,6 +336,7 @@ else
 
   # 下载 glibc
   if [ ! -d "glibc-2.39" ]; then
+    echo "下载并安装 glibc-2.39..."
     wget $GLIBC_URL -O glibc-2.39.tar.gz
     tar xzf glibc-2.39.tar.gz
     rm glibc-2.39.tar.gz
@@ -322,14 +344,27 @@ else
 
   # 下载 gcc
   if [ ! -d "gcc-14.2.0" ]; then
+    echo "下载并安装 gcc-14.2.0..."
     wget $GCC_URL -O gcc-14.2.0.tgz
     tar xzvf gcc-14.2.0.tgz
     rm gcc-14.2.0.tgz
   fi
 
+  # 如果需要兼容的 libstdc++.so.6，从 gcc 安装目录复制
+  if [ "$NEED_LIBSTDCXX" = true ] && [ -d "gcc-14.2.0" ]; then
+    echo "复制兼容的 libstdc++.so.6 到依赖目录..."
+    if [ -f "gcc-14.2.0/lib64/libstdc++.so.6" ]; then
+      cp "gcc-14.2.0/lib64/libstdc++.so.6" "$DEPS_DIR/libstdc++.so.6"
+      echo "已复制兼容的 libstdc++.so.6"
+    else
+      echo "警告: 未找到 gcc-14.2.0/lib64/libstdc++.so.6"
+    fi
+  fi
+
   # 安装 patchelf 到本地目录
   if ! command -v patchelf &> /dev/null; then
     if [ -n "$PATCHELF_URL" ]; then
+      echo "下载并安装 patchelf..."
       wget $PATCHELF_URL -O patchelf
       chmod +x patchelf
       # 放到本地 bin 目录
@@ -346,6 +381,16 @@ else
   export VSCODE_SERVER_CUSTOM_GLIBC_LINKER="$DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2"
   export VSCODE_SERVER_CUSTOM_GLIBC_PATH="$DEPS_DIR/glibc-2.39/lib:$DEPS_DIR/gcc-14.2.0/lib64:/lib64"
   export VSCODE_SERVER_PATCHELF_PATH="$DEPS_DIR/bin/patchelf"
+  
+  # 设置 LD_LIBRARY_PATH 以优先使用兼容的库
+  if [ "$NEED_LIBSTDCXX" = true ] && [ -f "$DEPS_DIR/libstdc++.so.6" ]; then
+    export LD_LIBRARY_PATH="$DEPS_DIR:$DEPS_DIR/gcc-14.2.0/lib64:$DEPS_DIR/glibc-2.39/lib:$LD_LIBRARY_PATH"
+    echo "已设置 LD_LIBRARY_PATH 以使用兼容的库文件"
+  else
+    export LD_LIBRARY_PATH="$DEPS_DIR/gcc-14.2.0/lib64:$DEPS_DIR/glibc-2.39/lib:$LD_LIBRARY_PATH"
+  fi
+  
+  echo "依赖安装完成，环境变量已设置"
 fi
 # ========== 依赖安装结束 ==========
 ` : '';
