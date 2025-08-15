@@ -17,6 +17,7 @@ export interface ServerInstallOptions {
     serverApplicationName: string;
     serverDataFolderName: string;
     serverDownloadUrlTemplate: string;
+    serverDownloadUrl?: string; // 手动指定的完整下载链接，优先级高于模板
     // 新增 glibc 相关依赖参数
     glibcUrl?: string;
     gccUrl?: string;
@@ -45,7 +46,7 @@ export class ServerInstallError extends Error {
 
 const DEFAULT_DOWNLOAD_URL_TEMPLATE = 'https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/vscodium/vscode-reh-${os}-${arch}-${version}.tar.gz';
 
-export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTemplate: string | undefined, extensionIds: string[], envVariables: string[], platform: string | undefined, useSocketPath: boolean, logger: Log): Promise<ServerInstallResult> {
+export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTemplate: string | undefined, serverDownloadUrl: string | undefined, extensionIds: string[], envVariables: string[], platform: string | undefined, useSocketPath: boolean, logger: Log): Promise<ServerInstallResult> {
     let shell = 'powershell';
 
     // detect platform and shell for windows
@@ -119,7 +120,9 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
         useSocketPath,
         serverApplicationName: vscodeServerConfig.serverApplicationName,
         serverDataFolderName: vscodeServerConfig.serverDataFolderName,
+        // 优先使用手动指定的完整下载链接，如果没有则使用模板
         serverDownloadUrlTemplate: serverDownloadUrlTemplate || vscodeServerConfig.serverDownloadUrlTemplate || DEFAULT_DOWNLOAD_URL_TEMPLATE,
+        serverDownloadUrl, // 手动指定的完整下载链接
         // 依赖下载地址从 remote.SSH 配置读取
         glibcUrl,
         gccUrl,
@@ -285,12 +288,21 @@ function parseServerInstallOutput(str: string, scriptId: string): { [k: string]:
     return resultMap;
 }
 
-function generateBashInstallScript({ id, quality, version, commit, release, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, serverDownloadUrlTemplate, glibcUrl, gccUrl, patchelfUrl, enableCustomGlibc }: ServerInstallOptions) {
+function generateBashInstallScript({ id, quality, version, commit, release, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, serverDownloadUrlTemplate, serverDownloadUrl, glibcUrl, gccUrl, patchelfUrl, enableCustomGlibc }: ServerInstallOptions) {
     const extensions = extensionIds.map(id => '--install-extension ' + id).join(' ');
-    // 依赖下载地址优先用参数，否则用默认
-    const GLIBC_URL = glibcUrl || '';
-    const GCC_URL = gccUrl || '';
-    const PATCHELF_URL = patchelfUrl || '';
+    
+    // 依赖下载地址优先用参数，否则用默认值
+    const GLIBC_URL = glibcUrl || 'https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/glibc-2.39/xinchenghua-public_glibc-2.39.tar.gz';
+    const GCC_URL = gccUrl || 'https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/glibc-2.39/xinchenghua-public_gcc-14.2.0.tgz';
+    const PATCHELF_URL = patchelfUrl || 'https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/glibc-2.39/xinchenghua-public_patchelf';
+    
+    // 添加调试日志
+    console.log('[ServerSetup] 生成安装脚本参数:', {
+        enableCustomGlibc,
+        GLIBC_URL,
+        GCC_URL,
+        PATCHELF_URL
+    });
     
     // 根据 enableCustomGlibc 参数决定是否包含 glibc 安装脚本
     // 同时检查 CLOUDDEV_CONTAINER 环境变量，如果存在则跳过 glibc 安装
@@ -306,6 +318,8 @@ if [ -n "$CLOUDDEV_CONTAINER" ]; then
 elif [ -f "/home/clouddev/.preference.env.zsh" ] && grep -q "CLOUDDEV_CONTAINER" "/home/clouddev/.preference.env.zsh"; then
   echo "检测到 /home/clouddev/.preference.env.zsh 文件中包含 CLOUDDEV_CONTAINER 配置，跳过自定义 glibc 注入"
 else
+  echo "开始执行 glibc 和 CXXABI 兼容性检查..."
+  
   # 检查系统 libstdc++.so.6 版本兼容性
   echo "检查系统 libstdc++.so.6 版本兼容性..."
   if [ -f "/lib64/libstdc++.so.6" ]; then
@@ -325,29 +339,52 @@ else
     NEED_LIBSTDCXX=true
   fi
 
-  GLIBC_URL="${GLIBC_URL}"
-  GCC_URL="${GCC_URL}"
-  PATCHELF_URL="${PATCHELF_URL}"
+  # 设置下载 URL（使用硬编码的 URL 避免变量替换问题）
+  GLIBC_DOWNLOAD_URL="${GLIBC_URL}"
+  GCC_DOWNLOAD_URL="${GCC_URL}"
+  PATCHELF_DOWNLOAD_URL="${PATCHELF_URL}"
+  
+  echo "使用下载地址:"
+  echo "  GLIBC: $GLIBC_DOWNLOAD_URL"
+  echo "  GCC: $GCC_DOWNLOAD_URL"
+  echo "  PATCHELF: $PATCHELF_DOWNLOAD_URL"
   
   # 依赖安装目录，使用用户目录，避免权限问题
   DEPS_DIR="$HOME/.vscode-server-deps"
   mkdir -p "$DEPS_DIR"
   cd "$DEPS_DIR"
+  echo "依赖安装目录: $DEPS_DIR"
 
   # 下载 glibc
   if [ ! -d "glibc-2.39" ]; then
     echo "下载并安装 glibc-2.39..."
-    wget $GLIBC_URL -O glibc-2.39.tar.gz
-    tar xzf glibc-2.39.tar.gz
-    rm glibc-2.39.tar.gz
+    wget "$GLIBC_DOWNLOAD_URL" -O glibc-2.39.tar.gz
+    if [ $? -eq 0 ]; then
+      tar xzf glibc-2.39.tar.gz
+      rm glibc-2.39.tar.gz
+      echo "glibc-2.39 安装完成"
+    else
+      echo "错误: glibc 下载失败"
+      exit 1
+    fi
+  else
+    echo "glibc-2.39 已存在，跳过下载"
   fi
 
   # 下载 gcc
   if [ ! -d "gcc-14.2.0" ]; then
     echo "下载并安装 gcc-14.2.0..."
-    wget $GCC_URL -O gcc-14.2.0.tgz
-    tar xzvf gcc-14.2.0.tgz
-    rm gcc-14.2.0.tgz
+    wget "$GCC_DOWNLOAD_URL" -O gcc-14.2.0.tgz
+    if [ $? -eq 0 ]; then
+      tar xzvf gcc-14.2.0.tgz
+      rm gcc-14.2.0.tgz
+      echo "gcc-14.2.0 安装完成"
+    else
+      echo "错误: gcc 下载失败"
+      exit 1
+    fi
+  else
+    echo "gcc-14.2.0 已存在，跳过下载"
   fi
 
   # 如果需要兼容的 libstdc++.so.6，从 gcc 安装目录复制
@@ -356,6 +393,13 @@ else
     if [ -f "gcc-14.2.0/lib64/libstdc++.so.6" ]; then
       cp "gcc-14.2.0/lib64/libstdc++.so.6" "$DEPS_DIR/libstdc++.so.6"
       echo "已复制兼容的 libstdc++.so.6"
+      
+      # 验证复制的库是否支持 CXXABI_1.3.8
+      if strings "$DEPS_DIR/libstdc++.so.6" | grep -q "CXXABI_1.3.8"; then
+        echo "验证成功: 复制的库支持 CXXABI_1.3.8"
+      else
+        echo "警告: 复制的库可能不支持 CXXABI_1.3.8"
+      fi
     else
       echo "警告: 未找到 gcc-14.2.0/lib64/libstdc++.so.6"
     fi
@@ -363,18 +407,26 @@ else
 
   # 安装 patchelf 到本地目录
   if ! command -v patchelf &> /dev/null; then
-    if [ -n "$PATCHELF_URL" ]; then
+    if [ -n "$PATCHELF_DOWNLOAD_URL" ]; then
       echo "下载并安装 patchelf..."
-      wget $PATCHELF_URL -O patchelf
-      chmod +x patchelf
-      # 放到本地 bin 目录
-      mkdir -p "$DEPS_DIR/bin"
-      mv patchelf "$DEPS_DIR/bin/patchelf"
-      export PATH="$DEPS_DIR/bin:$PATH"
+      wget "$PATCHELF_DOWNLOAD_URL" -O patchelf
+      if [ $? -eq 0 ]; then
+        chmod +x patchelf
+        # 放到本地 bin 目录
+        mkdir -p "$DEPS_DIR/bin"
+        mv patchelf "$DEPS_DIR/bin/patchelf"
+        export PATH="$DEPS_DIR/bin:$PATH"
+        echo "patchelf 安装完成: $DEPS_DIR/bin/patchelf"
+      else
+        echo "错误: patchelf 下载失败"
+        exit 1
+      fi
     else
       echo "请手动安装 patchelf 或提供 PATCHELF_URL"
       exit 1
     fi
+  else
+    echo "patchelf 已安装: $(which patchelf)"
   fi
 
   # 输出依赖路径
@@ -382,18 +434,31 @@ else
   export VSCODE_SERVER_CUSTOM_GLIBC_PATH="$DEPS_DIR/glibc-2.39/lib:$DEPS_DIR/gcc-14.2.0/lib64:/lib64"
   export VSCODE_SERVER_PATCHELF_PATH="$DEPS_DIR/bin/patchelf"
   
+  echo "设置环境变量:"
+  echo "  VSCODE_SERVER_CUSTOM_GLIBC_LINKER: $VSCODE_SERVER_CUSTOM_GLIBC_LINKER"
+  echo "  VSCODE_SERVER_CUSTOM_GLIBC_PATH: $VSCODE_SERVER_CUSTOM_GLIBC_PATH"
+  echo "  VSCODE_SERVER_PATCHELF_PATH: $VSCODE_SERVER_PATCHELF_PATH"
+  
   # 设置 LD_LIBRARY_PATH 以优先使用兼容的库
   if [ "$NEED_LIBSTDCXX" = true ] && [ -f "$DEPS_DIR/libstdc++.so.6" ]; then
     export LD_LIBRARY_PATH="$DEPS_DIR:$DEPS_DIR/gcc-14.2.0/lib64:$DEPS_DIR/glibc-2.39/lib:$LD_LIBRARY_PATH"
-    echo "已设置 LD_LIBRARY_PATH 以使用兼容的库文件"
+    echo "已设置 LD_LIBRARY_PATH 以使用兼容的库文件: $LD_LIBRARY_PATH"
   else
     export LD_LIBRARY_PATH="$DEPS_DIR/gcc-14.2.0/lib64:$DEPS_DIR/glibc-2.39/lib:$LD_LIBRARY_PATH"
+    echo "已设置 LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
   fi
   
   echo "依赖安装完成，环境变量已设置"
+  echo "CXXABI_1.3.8 兼容性处理完成"
 fi
 # ========== 依赖安装结束 ==========
 ` : '';
+    
+    // 添加调试日志
+    console.log('[ServerSetup] 生成的 glibcInstallScript 长度:', glibcInstallScript.length);
+    if (glibcInstallScript.length > 0) {
+        console.log('[ServerSetup] glibcInstallScript 预览:', glibcInstallScript.substring(0, 1000));
+    }
     
     return `
 # Server installation script
@@ -518,7 +583,14 @@ if [[ $OS_RELEASE_ID = alpine ]]; then
     PLATFORM=$OS_RELEASE_ID
 fi
 
-SERVER_DOWNLOAD_URL="$(echo "${serverDownloadUrlTemplate.replace(/\$\{/g, '\\${')}" | sed "s/\\\${quality}/$DISTRO_QUALITY/g" | sed "s/\\\${version}/$DISTRO_VERSION/g" | sed "s/\\\${commit}/$DISTRO_COMMIT/g" | sed "s/\\\${os}/$PLATFORM/g" | sed "s/\\\${arch}/$SERVER_ARCH/g" | sed "s/\\\${release}/$DISTRO_VSCODIUM_RELEASE/g")"
+# 优先使用手动指定的完整下载链接，如果没有则使用模板
+if [[ -n "${serverDownloadUrl}" ]]; then
+    SERVER_DOWNLOAD_URL="${serverDownloadUrl}"
+    echo "使用手动指定的完整下载链接: $SERVER_DOWNLOAD_URL"
+else
+    SERVER_DOWNLOAD_URL="$(echo "${serverDownloadUrlTemplate.replace(/\$\{/g, '\\${')}" | sed "s/\\\${quality}/$DISTRO_QUALITY/g" | sed "s/\\\${version}/$DISTRO_VERSION/g" | sed "s/\\\${commit}/$DISTRO_COMMIT/g" | sed "s/\\\${os}/$PLATFORM/g" | sed "s/\\\${arch}/$SERVER_ARCH/g" | sed "s/\\\${release}/$DISTRO_VSCODIUM_RELEASE/g")"
+    echo "使用模板生成的下载链接: $SERVER_DOWNLOAD_URL"
+fi
 
 
 echo "SERVER_DOWNLOAD_URL: $SERVER_DOWNLOAD_URL"
@@ -625,9 +697,10 @@ print_install_results_and_exit 0
 `;
 }
 
-function generatePowerShellInstallScript({ id, quality, version, commit, release, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, serverDownloadUrlTemplate, enableCustomGlibc }: ServerInstallOptions) {
+function generatePowerShellInstallScript({ id, quality, version, commit, release, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, serverDownloadUrlTemplate, serverDownloadUrl, enableCustomGlibc }: ServerInstallOptions) {
     const extensions = extensionIds.map(id => '--install-extension ' + id).join(' ');
-    const downloadUrl = serverDownloadUrlTemplate
+    // 优先使用手动指定的完整下载链接，如果没有则使用模板
+    const downloadUrl = serverDownloadUrl || serverDownloadUrlTemplate
         .replace(/\$\{quality\}/g, quality)
         .replace(/\$\{version\}/g, version)
         .replace(/\$\{commit\}/g, commit)

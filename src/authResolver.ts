@@ -82,6 +82,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         const enableDynamicForwarding = remoteSSHconfig.get<boolean>('enableDynamicForwarding', true)!;
         const enableAgentForwarding = remoteSSHconfig.get<boolean>('enableAgentForwarding', true)!;
         const serverDownloadUrlTemplate = remoteSSHconfig.get<string>('serverDownloadUrlTemplate');
+        const serverDownloadUrl = remoteSSHconfig.get<string>('serverDownloadUrl');
         const defaultExtensions = remoteSSHconfig.get<string[]>('defaultExtensions', []);
         const remotePlatformMap = remoteSSHconfig.get<Record<string, string>>('remotePlatform', {});
         const remoteServerListenOnSocket = remoteSSHconfig.get<boolean>('remoteServerListenOnSocket', false)!;
@@ -205,7 +206,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                     this.context.globalState.update('openRemoteSsh.needReinstallServer', false);
                 }
 
-                const installResult = await installCodeServer(this.sshConnection, serverDownloadUrlTemplate, defaultExtensions, Object.keys(envVariables), remotePlatformMap[sshDest.hostname], remoteServerListenOnSocket, this.logger);
+                const installResult = await installCodeServer(this.sshConnection, serverDownloadUrlTemplate, serverDownloadUrl, defaultExtensions, Object.keys(envVariables), remotePlatformMap[sshDest.hostname], remoteServerListenOnSocket, this.logger);
 
                 // 如果之前进行了重新安装，显示完成提示
                 if (needReinstallServer) {

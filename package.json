@@ -2,7 +2,7 @@
 	"name": "open-remote-ssh",
 	"displayName": "Open Remote - SSH",
 	"description": "Use any remote machine with a SSH server as your development environment.",
-	"version": "0.0.59",
+	"version": "0.0.60",
 	"publisher": "jeanp413",
 	"repository": {
 		"type": "git",
@@ -77,6 +77,11 @@
 				"remote.SSH.serverDownloadUrlTemplate": {
 					"type": "string",
 					"description": "The URL from where the vscode server will be downloaded. You can use the following variables and they will be replaced dynamically:\n- ${quality}: vscode server quality, e.g. stable or insiders\n- ${version}: vscode server version, e.g. 1.69.0\n- ${commit}: vscode server release commit\n- ${arch}: vscode server arch, e.g. x64, armhf, arm64\n- ${release}: release number, vscodium only https://github.com/VSCodium/vscodium/pull/1192",
+					"scope": "application"
+				},
+				"remote.SSH.serverDownloadUrl": {
+					"type": "string",
+					"description": "完整的 vscode server 下载链接。如果设置了此选项，将优先使用此链接进行下载，忽略 serverDownloadUrlTemplate 设置。此链接应该是完整的、可直接使用的下载地址。",
 					"scope": "application"
 				},
 				"remote.SSH.remotePlatform": {
