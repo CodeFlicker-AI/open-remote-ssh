@@ -463,55 +463,31 @@ fi
     return `
 # Server installation script
 
-${glibcInstallScript}
-
-TMP_DIR="\${XDG_RUNTIME_DIR:-\"/tmp\"}"
-
-DISTRO_VERSION="${version}"
-DISTRO_COMMIT="${commit}"
-DISTRO_QUALITY="${quality}"
-DISTRO_VSCODIUM_RELEASE="${release ?? ''}"
-
-SERVER_APP_NAME="${serverApplicationName}"
-SERVER_INITIAL_EXTENSIONS="${extensions}"
-SERVER_LISTEN_FLAG="${useSocketPath ? `--socket-path=\"$TMP_DIR/vscode-server-sock-${crypto.randomUUID()}\"` : '--port=0'}"
-SERVER_DATA_DIR="$HOME/${serverDataFolderName}"
-SERVER_DIR="$SERVER_DATA_DIR/bin/$DISTRO_COMMIT"
-SERVER_SCRIPT="$SERVER_DIR/bin/$SERVER_APP_NAME"
-SERVER_LOGFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.log"
-SERVER_PIDFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.pid"
-SERVER_TOKENFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.token"
-SERVER_ARCH=
-SERVER_CONNECTION_TOKEN=
-SERVER_DOWNLOAD_URL=
-
-LISTENING_ON=
-OS_RELEASE_ID=
-ARCH=
-PLATFORM=
-
-# Mimic output from logs of remote-ssh extension
-print_install_results_and_exit() {
-    local code=$1
-    local msg=$2
-    echo "${id}: start"
-    echo "exitCode==$code=="
-    echo "errorMsg==$2=="
-    echo "listeningOn==$LISTENING_ON=="
-    echo "connectionToken==$SERVER_CONNECTION_TOKEN=="
-    echo "logFile==$SERVER_LOGFILE=="
-    echo "osReleaseId==$OS_RELEASE_ID=="
-    echo "arch==$ARCH=="
-    echo "platform==$PLATFORM=="
-    echo "tmpDir==$TMP_DIR=="
-    ${envVariables.map(envVar => `echo \"${envVar}==\$${envVar}==\"`).join('\n')}
-    echo "${id}: end"
-    exit 0
-}
+# ========== 重要：在设置自定义 glibc 环境之前先检测平台信息 ==========
+echo "开始检测平台信息..."
 
 # Check if platform is supported
-KERNEL="$(uname -s)"
-case $KERNEL in
+KERNEL="$(uname -s 2>/dev/null || echo 'Linux')"
+echo "uname -s 结果: '\$KERNEL'"
+
+if [[ -z "\$KERNEL" ]]; then
+    echo "警告: uname 命令执行失败，使用默认平台检测"
+    # 尝试其他方式检测平台
+    if [[ -f /etc/os-release ]] || [[ -f /usr/lib/os-release ]]; then
+        KERNEL="Linux"
+        echo "通过 /etc/os-release 检测到平台: \$KERNEL"
+    elif [[ -f /System/Library/CoreServices/SystemVersion.plist ]]; then
+        KERNEL="Darwin"
+        echo "通过 SystemVersion.plist 检测到平台: \$KERNEL"
+    else
+        KERNEL="Linux"  # 默认假设为 Linux
+        echo "使用默认平台: \$KERNEL"
+    fi
+fi
+
+echo "最终检测到的平台: \$KERNEL"
+
+case \$KERNEL in
     Darwin)
         PLATFORM="darwin"
         ;;
@@ -525,14 +501,43 @@ case $KERNEL in
         PLATFORM="dragonfly"
         ;;
     *)
-        echo "Error platform not supported: $KERNEL"
-        print_install_results_and_exit 1 "Error platform not supported: $KERNEL"
+        echo "Error platform not supported: \$KERNEL"
+        print_install_results_and_exit 1 "Error platform not supported: \$KERNEL"
         ;;
 esac
 
+echo "开始检测架构信息..."
+
 # Check machine architecture
-ARCH="$(uname -m)"
-case $ARCH in
+ARCH="$(uname -m 2>/dev/null || echo 'x86_64')"
+echo "uname -m 结果: '\$ARCH'"
+
+if [[ -z "\$ARCH" ]]; then
+    echo "警告: uname -m 命令执行失败，使用默认架构检测"
+    # 尝试其他方式检测架构
+    if [[ -f /proc/cpuinfo ]]; then
+        if grep -q "x86_64\|amd64" /proc/cpuinfo; then
+            ARCH="x86_64"
+            echo "通过 /proc/cpuinfo 检测到架构: \$ARCH"
+        elif grep -q "aarch64\|arm64" /proc/cpuinfo; then
+            ARCH="aarch64"
+            echo "通过 /proc/cpuinfo 检测到架构: \$ARCH"
+        elif grep -q "armv7l\|armv8l" /proc/cpuinfo; then
+            ARCH="armv7l"
+            echo "通过 /proc/cpuinfo 检测到架构: \$ARCH"
+        else
+            ARCH="x86_64"  # 默认假设为 x86_64
+            echo "通过 /proc/cpuinfo 未检测到明确架构，使用默认: \$ARCH"
+        fi
+    else
+        ARCH="x86_64"  # 默认假设为 x86_64
+        echo "未找到 /proc/cpuinfo，使用默认架构: \$ARCH"
+    fi
+fi
+
+echo "最终检测到的架构: \$ARCH"
+
+case \$ARCH in
     x86_64 | amd64)
         SERVER_ARCH="x64"
         ;;
@@ -555,10 +560,56 @@ case $ARCH in
         SERVER_ARCH="s390x"
         ;;
     *)
-        echo "Error architecture not supported: $ARCH"
-        print_install_results_and_exit 1 "Error architecture not supported: $ARCH"
+        echo "Error architecture not supported: \$ARCH"
+        print_install_results_and_exit 1 "Error architecture not supported: \$ARCH"
         ;;
 esac
+
+echo "平台检测完成: PLATFORM=\$PLATFORM, SERVER_ARCH=\$SERVER_ARCH"
+
+TMP_DIR="\${XDG_RUNTIME_DIR:-\"/tmp\"}"
+
+DISTRO_VERSION="${version}"
+DISTRO_COMMIT="${commit}"
+DISTRO_QUALITY="${quality}"
+DISTRO_VSCODIUM_RELEASE="${release ?? ''}"
+
+SERVER_APP_NAME="${serverApplicationName}"
+SERVER_INITIAL_EXTENSIONS="${extensions}"
+SERVER_LISTEN_FLAG="${useSocketPath ? `--socket-path=\"$TMP_DIR/vscode-server-sock-${crypto.randomUUID()}\"` : '--port=0'}"
+SERVER_DATA_DIR="$HOME/${serverDataFolderName}"
+SERVER_DIR="$SERVER_DATA_DIR/bin/$DISTRO_COMMIT"
+SERVER_SCRIPT="$SERVER_DIR/bin/$SERVER_APP_NAME"
+SERVER_LOGFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.log"
+SERVER_PIDFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.pid"
+SERVER_TOKENFILE="$SERVER_DATA_DIR/.$DISTRO_COMMIT.token"
+SERVER_CONNECTION_TOKEN=
+SERVER_DOWNLOAD_URL=
+
+LISTENING_ON=
+OS_RELEASE_ID=
+
+# Mimic output from logs of remote-ssh extension
+print_install_results_and_exit() {
+    local code=\$1
+    local msg=\$2
+    echo "${id}: start"
+    echo "exitCode==\$code=="
+    echo "errorMsg==\$2=="
+    echo "listeningOn==\$LISTENING_ON=="
+    echo "connectionToken==\$SERVER_CONNECTION_TOKEN=="
+    echo "logFile==\$SERVER_LOGFILE=="
+    echo "osReleaseId==\$OS_RELEASE_ID=="
+    echo "arch==\$ARCH=="
+    echo "platform==\$PLATFORM=="
+    echo "tmpDir==\$TMP_DIR=="
+    ${envVariables.map(envVar => `echo \"${envVar}==\$${envVar}=="`).join('\n')}
+    echo "${id}: end"
+    exit 0
+}
+
+# ========== 现在执行 glibc 安装脚本（在平台检测之后） ==========
+${glibcInstallScript}
 
 # https://www.freedesktop.org/software/systemd/man/os-release.html
 OS_RELEASE_ID="$(grep -i '^ID=' /etc/os-release 2>/dev/null | sed 's/^ID=//gi' | sed 's/"//g')"
