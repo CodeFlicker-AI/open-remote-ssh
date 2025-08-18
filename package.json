@@ -111,7 +111,7 @@
 				},
 				"remote.SSH.enableCustomGlibc": {
 					"type": "boolean",
-					"default": true,
+					"default": false,
 					"description": "启用自定义 glibc 依赖注入"
 				},
 				"remote.SSH.customGlibcUrl": {
