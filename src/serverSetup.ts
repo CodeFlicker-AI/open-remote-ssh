@@ -448,6 +448,19 @@ else
     echo "已设置 LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
   fi
   
+  # 重要：设置 LD_LIBRARY_PATH 确保动态链接器使用新版本
+  # 这可以避免 __tunable_get_val 符号版本冲突
+  export LD_LIBRARY_PATH="$DEPS_DIR/glibc-2.39/lib:$LD_LIBRARY_PATH"
+  
+  # 验证动态链接器路径
+  if [ -f "$DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2" ]; then
+    echo "验证动态链接器: $DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2"
+    echo "动态链接器版本信息:"
+    "$DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2" --version 2>/dev/null || echo "无法获取版本信息"
+  else
+    echo "警告: 动态链接器不存在: $DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2"
+  fi
+  
   echo "依赖安装完成，环境变量已设置"
   echo "CXXABI_1.3.8 兼容性处理完成"
 fi
