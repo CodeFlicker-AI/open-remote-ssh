@@ -42,6 +42,7 @@ function getCurrentGlibcConfig() {
     customGlibcUrl: config.get('customGlibcUrl'),
     customGccUrl: config.get('customGccUrl'),
     customPatchelfUrl: config.get('customPatchelfUrl'),
+    serverDownloadUrl: config.get('serverDownloadUrl'),
   };
 }
 

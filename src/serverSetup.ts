@@ -85,30 +85,6 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
     const gccUrl = remoteSSHconfig.get('customGccUrl');
     const patchelfUrl = remoteSSHconfig.get('customPatchelfUrl');
     let enableCustomGlibc = remoteSSHconfig.get('enableCustomGlibc');
-    
-    // 检查远程服务器的 CLOUDDEV_CONTAINER 环境变量
-    // 如果远程服务器设置了 CLOUDDEV_CONTAINER 环境变量，则自动禁用 glibc 安装
-    try {
-        // 首先检查环境变量
-        const clouddevResult = await conn.exec('echo $CLOUDDEV_CONTAINER');
-        if (clouddevResult.stdout && clouddevResult.stdout.trim()) {
-            logger.info(`检测到远程服务器 CLOUDDEV_CONTAINER 环境变量: ${clouddevResult.stdout.trim()}`);
-            enableCustomGlibc = false;
-        } else {
-            // 如果环境变量不存在，检查 /home/clouddev/.preference.env.zsh 文件
-            const preferenceFileResult = await conn.exec('test -f /home/clouddev/.preference.env.zsh && echo "exists" || echo "not_exists"');
-            if (preferenceFileResult.stdout && preferenceFileResult.stdout.trim() === 'exists') {
-                // 检查文件中是否包含 CLOUDDEV_CONTAINER
-                const clouddevInFileResult = await conn.exec('grep -q "CLOUDDEV_CONTAINER" /home/clouddev/.preference.env.zsh && echo "found" || echo "not_found"');
-                if (clouddevInFileResult.stdout && clouddevInFileResult.stdout.trim() === 'found') {
-                    logger.info('检测到 /home/clouddev/.preference.env.zsh 文件中包含 CLOUDDEV_CONTAINER 配置');
-                    enableCustomGlibc = false;
-                }
-            }
-        }
-    } catch (e) {
-        logger.trace('检查 CLOUDDEV_CONTAINER 环境变量失败:', e);
-    }
     const installOptions: ServerInstallOptions = {
         id: scriptId,
         version: vscodeServerConfig.version,
@@ -187,15 +163,6 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
         commandOutput = await conn.execPartial(command, (stdout: string) => endRegex.test(stdout));
     } else {
         const installServerScript = generateBashInstallScript(installOptions);
-
-        // 保存 Bash 安装脚本到本地，便于后续定位问题
-        try {
-            const shPath = path.join(process.cwd(), 'vscode-server-install.sh');
-            fs.writeFileSync(shPath, installServerScript, 'utf8');
-            logger.info(`已将 Bash 安装脚本保存到本地：${shPath}`);
-        } catch (e) {
-            logger.error('保存 Bash 安装脚本失败: ' + e);
-        }
 
         logger.trace('Server install command:', installServerScript);
         // Fish shell does not support heredoc so let's workaround it using -c option,
@@ -305,165 +272,95 @@ function generateBashInstallScript({ id, quality, version, commit, release, exte
     });
     
     // 根据 enableCustomGlibc 参数决定是否包含 glibc 安装脚本
-    // 同时检查 CLOUDDEV_CONTAINER 环境变量，如果存在则跳过 glibc 安装
     const glibcInstallScript = enableCustomGlibc ? `
 # ========== 自动下载安装 glibc 及相关依赖 ==========
 echo "enableCustomGlibc: ${enableCustomGlibc}"
-echo "CLOUDDEV_CONTAINER 环境变量检查: $CLOUDDEV_CONTAINER"
 
-# 检查 CLOUDDEV_CONTAINER 环境变量或配置文件，如果存在则跳过 glibc 安装
-if [ -n "$CLOUDDEV_CONTAINER" ]; then
-  echo "检测到 CLOUDDEV_CONTAINER 环境变量，跳过自定义 glibc 注入"
-  echo "CLOUDDEV_CONTAINER 值: $CLOUDDEV_CONTAINER"
-elif [ -f "/home/clouddev/.preference.env.zsh" ] && grep -q "CLOUDDEV_CONTAINER" "/home/clouddev/.preference.env.zsh"; then
-  echo "检测到 /home/clouddev/.preference.env.zsh 文件中包含 CLOUDDEV_CONTAINER 配置，跳过自定义 glibc 注入"
+echo "开始执行 glibc 依赖安装..."
+
+# 设置下载 URL（使用硬编码的 URL 避免变量替换问题）
+GLIBC_DOWNLOAD_URL="${GLIBC_URL}"
+GCC_DOWNLOAD_URL="${GCC_URL}"
+PATCHELF_DOWNLOAD_URL="${PATCHELF_URL}"
+
+echo "使用下载地址:"
+echo "  GLIBC: $GLIBC_DOWNLOAD_URL"
+echo "  GCC: $GCC_DOWNLOAD_URL"
+echo "  PATCHELF: $PATCHELF_DOWNLOAD_URL"
+
+# 依赖安装目录，使用用户目录，避免权限问题
+DEPS_DIR="$HOME/.vscode-server-deps"
+mkdir -p "$DEPS_DIR"
+cd "$DEPS_DIR"
+echo "依赖安装目录: $DEPS_DIR"
+
+# 下载 glibc
+if [ ! -d "glibc-2.39" ]; then
+  echo "下载并安装 glibc-2.39..."
+  wget "$GLIBC_DOWNLOAD_URL" -O glibc-2.39.tar.gz
+  if [ $? -eq 0 ]; then
+    tar xzf glibc-2.39.tar.gz
+    rm glibc-2.39.tar.gz
+    echo "glibc-2.39 安装完成"
+  else
+    echo "错误: glibc 下载失败"
+    exit 1
+  fi
 else
-  echo "开始执行 glibc 和 CXXABI 兼容性检查..."
-  
-  # 检查系统 libstdc++.so.6 版本兼容性
-  echo "检查系统 libstdc++.so.6 版本兼容性..."
-  if [ -f "/lib64/libstdc++.so.6" ]; then
-    CXXABI_VERSIONS=$(strings /lib64/libstdc++.so.6 | grep CXXABI | sort -V | tail -1)
-    echo "当前系统支持的 CXXABI 最高版本: $CXXABI_VERSIONS"
-    
-    # 检查是否支持 CXXABI_1.3.8
-    if ! strings /lib64/libstdc++.so.6 | grep -q "CXXABI_1.3.8"; then
-      echo "警告: 系统 libstdc++.so.6 不支持 CXXABI_1.3.8，需要下载兼容版本"
-      NEED_LIBSTDCXX=true
-    else
-      echo "系统 libstdc++.so.6 已支持 CXXABI_1.3.8"
-      NEED_LIBSTDCXX=false
-    fi
-  else
-    echo "警告: 未找到系统 libstdc++.so.6，需要下载兼容版本"
-    NEED_LIBSTDCXX=true
-  fi
-
-  # 设置下载 URL（使用硬编码的 URL 避免变量替换问题）
-  GLIBC_DOWNLOAD_URL="${GLIBC_URL}"
-  GCC_DOWNLOAD_URL="${GCC_URL}"
-  PATCHELF_DOWNLOAD_URL="${PATCHELF_URL}"
-  
-  echo "使用下载地址:"
-  echo "  GLIBC: $GLIBC_DOWNLOAD_URL"
-  echo "  GCC: $GCC_DOWNLOAD_URL"
-  echo "  PATCHELF: $PATCHELF_DOWNLOAD_URL"
-  
-  # 依赖安装目录，使用用户目录，避免权限问题
-  DEPS_DIR="$HOME/.vscode-server-deps"
-  mkdir -p "$DEPS_DIR"
-  cd "$DEPS_DIR"
-  echo "依赖安装目录: $DEPS_DIR"
-
-  # 下载 glibc
-  if [ ! -d "glibc-2.39" ]; then
-    echo "下载并安装 glibc-2.39..."
-    wget "$GLIBC_DOWNLOAD_URL" -O glibc-2.39.tar.gz
-    if [ $? -eq 0 ]; then
-      tar xzf glibc-2.39.tar.gz
-      rm glibc-2.39.tar.gz
-      echo "glibc-2.39 安装完成"
-    else
-      echo "错误: glibc 下载失败"
-      exit 1
-    fi
-  else
-    echo "glibc-2.39 已存在，跳过下载"
-  fi
-
-  # 下载 gcc
-  if [ ! -d "gcc-14.2.0" ]; then
-    echo "下载并安装 gcc-14.2.0..."
-    wget "$GCC_DOWNLOAD_URL" -O gcc-14.2.0.tgz
-    if [ $? -eq 0 ]; then
-      tar xzvf gcc-14.2.0.tgz
-      rm gcc-14.2.0.tgz
-      echo "gcc-14.2.0 安装完成"
-    else
-      echo "错误: gcc 下载失败"
-      exit 1
-    fi
-  else
-    echo "gcc-14.2.0 已存在，跳过下载"
-  fi
-
-  # 如果需要兼容的 libstdc++.so.6，从 gcc 安装目录复制
-  if [ "$NEED_LIBSTDCXX" = true ] && [ -d "gcc-14.2.0" ]; then
-    echo "复制兼容的 libstdc++.so.6 到依赖目录..."
-    if [ -f "gcc-14.2.0/lib64/libstdc++.so.6" ]; then
-      cp "gcc-14.2.0/lib64/libstdc++.so.6" "$DEPS_DIR/libstdc++.so.6"
-      echo "已复制兼容的 libstdc++.so.6"
-      
-      # 验证复制的库是否支持 CXXABI_1.3.8
-      if strings "$DEPS_DIR/libstdc++.so.6" | grep -q "CXXABI_1.3.8"; then
-        echo "验证成功: 复制的库支持 CXXABI_1.3.8"
-      else
-        echo "警告: 复制的库可能不支持 CXXABI_1.3.8"
-      fi
-    else
-      echo "警告: 未找到 gcc-14.2.0/lib64/libstdc++.so.6"
-    fi
-  fi
-
-  # 安装 patchelf 到本地目录
-  if ! command -v patchelf &> /dev/null; then
-    if [ -n "$PATCHELF_DOWNLOAD_URL" ]; then
-      echo "下载并安装 patchelf..."
-      wget "$PATCHELF_DOWNLOAD_URL" -O patchelf
-      if [ $? -eq 0 ]; then
-        chmod +x patchelf
-        # 放到本地 bin 目录
-        mkdir -p "$DEPS_DIR/bin"
-        mv patchelf "$DEPS_DIR/bin/patchelf"
-        export PATH="$DEPS_DIR/bin:$PATH"
-        echo "patchelf 安装完成: $DEPS_DIR/bin/patchelf"
-      else
-        echo "错误: patchelf 下载失败"
-        exit 1
-      fi
-    else
-      echo "请手动安装 patchelf 或提供 PATCHELF_URL"
-      exit 1
-    fi
-  else
-    echo "patchelf 已安装: $(which patchelf)"
-  fi
-
-  # 输出依赖路径
-  export VSCODE_SERVER_CUSTOM_GLIBC_LINKER="$DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2"
-  export VSCODE_SERVER_CUSTOM_GLIBC_PATH="$DEPS_DIR/glibc-2.39/lib:$DEPS_DIR/gcc-14.2.0/lib64:/lib64"
-  export VSCODE_SERVER_PATCHELF_PATH="$DEPS_DIR/bin/patchelf"
-  
-  echo "设置环境变量:"
-  echo "  VSCODE_SERVER_CUSTOM_GLIBC_LINKER: $VSCODE_SERVER_CUSTOM_GLIBC_LINKER"
-  echo "  VSCODE_SERVER_CUSTOM_GLIBC_PATH: $VSCODE_SERVER_CUSTOM_GLIBC_PATH"
-  echo "  VSCODE_SERVER_PATCHELF_PATH: $VSCODE_SERVER_PATCHELF_PATH"
-  
-  # 设置 LD_LIBRARY_PATH 以优先使用兼容的库
-  if [ "$NEED_LIBSTDCXX" = true ] && [ -f "$DEPS_DIR/libstdc++.so.6" ]; then
-    export LD_LIBRARY_PATH="$DEPS_DIR:$DEPS_DIR/gcc-14.2.0/lib64:$DEPS_DIR/glibc-2.39/lib:$LD_LIBRARY_PATH"
-    echo "已设置 LD_LIBRARY_PATH 以使用兼容的库文件: $LD_LIBRARY_PATH"
-  else
-    export LD_LIBRARY_PATH="$DEPS_DIR/gcc-14.2.0/lib64:$DEPS_DIR/glibc-2.39/lib:$LD_LIBRARY_PATH"
-    echo "已设置 LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
-  fi
-  
-  # 重要：设置 LD_LIBRARY_PATH 确保动态链接器使用新版本
-  # 这可以避免 __tunable_get_val 符号版本冲突
-  export LD_LIBRARY_PATH="$DEPS_DIR/glibc-2.39/lib:$LD_LIBRARY_PATH"
-  
-  # 验证动态链接器路径
-  if [ -f "$DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2" ]; then
-    echo "验证动态链接器: $DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2"
-    echo "动态链接器版本信息:"
-    "$DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2" --version 2>/dev/null || echo "无法获取版本信息"
-  else
-    echo "警告: 动态链接器不存在: $DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2"
-  fi
-  
-  echo "依赖安装完成，环境变量已设置"
-  echo "CXXABI_1.3.8 兼容性处理完成"
+  echo "glibc-2.39 已存在，跳过下载"
 fi
+
+# 下载 gcc（主要用于提供较新的 libgcc 等依赖）
+if [ ! -d "gcc-14.2.0" ]; then
+  echo "下载并安装 gcc-14.2.0..."
+  wget "$GCC_DOWNLOAD_URL" -O gcc-14.2.0.tgz
+  if [ $? -eq 0 ]; then
+    tar xzvf gcc-14.2.0.tgz
+    rm gcc-14.2.0.tgz
+    echo "gcc-14.2.0 安装完成"
+  else
+    echo "错误: gcc 下载失败"
+    exit 1
+  fi
+else
+  echo "gcc-14.2.0 已存在，跳过下载"
+fi
+
+# 安装 patchelf 到本地目录
+if ! command -v patchelf &> /dev/null; then
+  if [ -n "$PATCHELF_DOWNLOAD_URL" ]; then
+    echo "下载并安装 patchelf..."
+    wget "$PATCHELF_DOWNLOAD_URL" -O patchelf
+    if [ $? -eq 0 ]; then
+      chmod +x patchelf
+      # 放到本地 bin 目录
+      mkdir -p "$DEPS_DIR/bin"
+      mv patchelf "$DEPS_DIR/bin/patchelf"
+      export PATH="$DEPS_DIR/bin:$PATH"
+      echo "patchelf 安装完成: $DEPS_DIR/bin/patchelf"
+    else
+      echo "错误: patchelf 下载失败"
+      exit 1
+    fi
+  else
+    echo "请手动安装 patchelf 或提供 PATCHELF_URL"
+    exit 1
+  fi
+else
+  echo "patchelf 已安装: $(which patchelf)"
+fi
+
+# 输出依赖路径
+export VSCODE_SERVER_CUSTOM_GLIBC_LINKER="$DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2"
+export VSCODE_SERVER_CUSTOM_GLIBC_PATH="$DEPS_DIR/glibc-2.39/lib:$DEPS_DIR/gcc-14.2.0/lib64:/lib64"
+export VSCODE_SERVER_PATCHELF_PATH="$DEPS_DIR/bin/patchelf"
+
+echo "设置环境变量:"
+echo "  VSCODE_SERVER_CUSTOM_GLIBC_LINKER: $VSCODE_SERVER_CUSTOM_GLIBC_LINKER"
+echo "  VSCODE_SERVER_CUSTOM_GLIBC_PATH: $VSCODE_SERVER_CUSTOM_GLIBC_PATH"
+echo "  VSCODE_SERVER_PATCHELF_PATH: $VSCODE_SERVER_PATCHELF_PATH"
+
+echo "依赖安装完成，环境变量已设置"
 # ========== 依赖安装结束 ==========
 ` : '';
     

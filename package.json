@@ -2,7 +2,7 @@
 	"name": "open-remote-ssh",
 	"displayName": "Open Remote - SSH",
 	"description": "Use any remote machine with a SSH server as your development environment.",
-	"version": "0.0.62",
+	"version": "0.0.63",
 	"publisher": "jeanp413",
 	"repository": {
 		"type": "git",
@@ -74,16 +74,6 @@
 					"scope": "application",
 					"default": true
 				},
-				"remote.SSH.serverDownloadUrlTemplate": {
-					"type": "string",
-					"description": "The URL from where the vscode server will be downloaded. You can use the following variables and they will be replaced dynamically:\n- ${quality}: vscode server quality, e.g. stable or insiders\n- ${version}: vscode server version, e.g. 1.69.0\n- ${commit}: vscode server release commit\n- ${arch}: vscode server arch, e.g. x64, armhf, arm64\n- ${release}: release number, vscodium only https://github.com/VSCodium/vscodium/pull/1192",
-					"scope": "application"
-				},
-				"remote.SSH.serverDownloadUrl": {
-					"type": "string",
-					"description": "完整的 vscode server 下载链接。如果设置了此选项，将优先使用此链接进行下载，忽略 serverDownloadUrlTemplate 设置。此链接应该是完整的、可直接使用的下载地址。",
-					"scope": "application"
-				},
 				"remote.SSH.remotePlatform": {
 					"type": "object",
 					"description": "A map of the remote hostname to the platform for that remote. Valid values: linux, macos, windows.",
@@ -116,18 +106,23 @@
 				},
 				"remote.SSH.customGlibcUrl": {
 					"type": "string",
-					"default": "https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/glibc-2.39/xinchenghua-public_glibc-2.39.tar.gz",
+					"default": "https://h2.static.yximgs.com/kcdn/cdn-kcdn112115/vscodium/xinchenghua-public_glibc-2.39.tar.gz",
 					"description": "自定义 glibc linker 路径"
 				},
 				"remote.SSH.customGccUrl": {
 					"type": "string",
-					"default": "https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/glibc-2.39/xinchenghua-public_gcc-14.2.0.tgz",
+					"default": "https://h2.static.yximgs.com/kcdn/cdn-kcdn112115/vscodium/xinchenghua-public_gcc-14.2.0.tgz",
 					"description": "自定义 glibc lib 路径"
 				},
 				"remote.SSH.customPatchelfUrl": {
 					"type": "string",
-					"default": "https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/glibc-2.39/xinchenghua-public_patchelf",
+					"default": "https://h2.static.yximgs.com/kcdn/cdn-kcdn112115/vscodium/xinchenghua-public_patchelf",
 					"description": "自定义 patchelf 路径"
+				},
+				"remote.SSH.serverDownloadUrl": {
+					"type": "string",
+					"description": "完整的 vscode server 下载链接。如果设置了此选项，将优先使用此链接进行下载。此链接应该是完整的、可直接使用的下载地址。",
+					"scope": "application"
 				}
 			}
 		},
