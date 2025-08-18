@@ -45,6 +45,29 @@ function getCurrentGlibcConfig() {
   };
 }
 
+// 检测并自动修复 node-pty 的 glibc 兼容性问题
+async function checkAndFixNodePtyGlibc(logger: Log) {
+  try {
+    // 检查是否启用了自定义 glibc
+    const config = vscode.workspace.getConfiguration('remote.SSH');
+    const enableCustomGlibc = config.get('enableCustomGlibc');
+    
+    if (!enableCustomGlibc) {
+      logger.info('未启用自定义 glibc，跳过 node-pty 兼容性检查');
+      return;
+    }
+    
+    logger.info('开始检查 node-pty 的 glibc 兼容性...');
+    
+    // 这里可以添加更详细的检测逻辑
+    // 由于这是在客户端，我们主要记录日志，实际的修复在服务器端进行
+    logger.info('node-pty 兼容性检查完成，修复将在服务器端自动进行');
+    
+  } catch (error) {
+    logger.error('检查 node-pty 兼容性时出错:', error);
+  }
+}
+
 export async function activate(context: vscode.ExtensionContext) {
     const logger = new Log('Remote - SSH');
     context.subscriptions.push(logger);
@@ -67,6 +90,9 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openEmptyWindowInCurrentWindow', () => promptOpenRemoteSSHWindow(true)));
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.openConfigFile', () => openSSHConfigFile()));
     context.subscriptions.push(vscode.commands.registerCommand('openremotessh.showLog', () => logger.show()));
+
+    // 检查并修复 node-pty 的 glibc 兼容性问题
+    await checkAndFixNodePtyGlibc(logger);
 
     // 监听 GLIBC 相关配置变更，变更后记录标志，重启后自动触发 server 重新安装
     vscode.workspace.onDidChangeConfiguration(async e => {

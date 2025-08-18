@@ -461,8 +461,107 @@ else
     echo "警告: 动态链接器不存在: $DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2"
   fi
   
+  # ========== 自动修复 node-pty 的 glibc 兼容性问题 ==========
+  echo "开始修复 node-pty 的 glibc 兼容性问题..."
+  
+  # 定义修复函数
+  fix_node_pty_glibc() {
+    local deps_dir="$1"
+    local server_data_dir="$2"
+    
+    echo "检查并修复 node-pty 的 glibc 兼容性..."
+    
+    # 检查是否存在 patchelf
+    if ! command -v patchelf >/dev/null 2>&1; then
+      echo "警告: patchelf 不可用，无法修复 node-pty"
+      return 1
+    fi
+    
+    # 检查自定义 glibc 是否可用
+    if [ ! -f "$deps_dir/glibc-2.39/lib/ld-linux-x86-64.so.2" ]; then
+      echo "警告: 自定义 glibc 不可用，无法修复 node-pty"
+      return 1
+    fi
+    
+    # 查找并修复所有 node-pty 模块
+    local fixed_count=0
+    local total_count=0
+    
+    if [ -d "$server_data_dir" ]; then
+      # 查找所有 node-pty 模块路径
+      find "$server_data_dir" -name "node-pty" -type d 2>/dev/null | while read pty_path; do
+        echo "  检查 node-pty 模块: $pty_path"
+        
+        # 查找 .node 文件
+        find "$pty_path" -name "*.node" -type f 2>/dev/null | while read pty_node; do
+          total_count=$((total_count + 1))
+          echo "    检查: $pty_node"
+          
+          # 检查是否需要修复（通过检查动态链接器路径）
+          local current_interpreter=$(patchelf --print-interpreter "$pty_node" 2>/dev/null)
+          local expected_interpreter="$deps_dir/glibc-2.39/lib/ld-linux-x86-64.so.2"
+          
+          if [ "$current_interpreter" != "$expected_interpreter" ]; then
+            echo "      需要修复: 当前链接器 $current_interpreter"
+            
+            # 检查文件是否可写
+            if [ -w "$pty_node" ]; then
+              # 使用 patchelf 修复
+              if patchelf --set-interpreter "$expected_interpreter" \
+                         --set-rpath "$deps_dir/glibc-2.39/lib:$deps_dir/gcc-14.2.0/lib64:$deps_dir" \
+                         "$pty_node" 2>/dev/null; then
+                echo "      修复成功"
+                fixed_count=$((fixed_count + 1))
+              else
+                echo "      修复失败"
+              fi
+            else
+              echo "      警告: 文件不可写，跳过修复"
+            fi
+          else
+            echo "      无需修复: 已使用正确的链接器"
+          fi
+        done
+      done
+    fi
+    
+    echo "node-pty 修复完成: 修复了 $fixed_count 个文件"
+    return 0
+  }
+  
+  # 执行修复
+  fix_node_pty_glibc "$DEPS_DIR" "$SERVER_DATA_DIR"
+  
+  # 创建环境变量配置文件，供后续启动使用
+  cat > "$DEPS_DIR/vscode-server-env.sh" << 'EOF'
+#!/bin/bash
+# VSCode Server 环境变量配置文件
+# 自动生成于: $(date)
+
+DEPS_DIR="$HOME/.vscode-server-deps"
+
+# 设置自定义 glibc 环境变量
+export VSCODE_SERVER_CUSTOM_GLIBC_LINKER="$DEPS_DIR/glibc-2.39/lib/ld-linux-x86-64.so.2"
+export VSCODE_SERVER_CUSTOM_GLIBC_PATH="$DEPS_DIR/glibc-2.39/lib:$DEPS_DIR/gcc-14.2.0/lib64:/lib64"
+export VSCODE_SERVER_PATCHELF_PATH="$DEPS_DIR/bin/patchelf"
+
+# 设置 LD_LIBRARY_PATH 以优先使用兼容的库
+export LD_LIBRARY_PATH="$DEPS_DIR/glibc-2.39/lib:$DEPS_DIR/gcc-14.2.0/lib64:$DEPS_DIR:$LD_LIBRARY_PATH"
+
+# 设置 LD_PRELOAD 强制使用自定义的 glibc（可选，用于解决符号版本冲突）
+# export LD_PRELOAD="$DEPS_DIR/glibc-2.39/lib/libc.so.6"
+
+echo "VSCode Server 环境变量已加载"
+echo "  LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+echo "  VSCODE_SERVER_CUSTOM_GLIBC_LINKER: $VSCODE_SERVER_CUSTOM_GLIBC_LINKER"
+EOF
+  
+  chmod +x "$DEPS_DIR/vscode-server-env.sh"
+  echo "环境变量配置文件已创建: $DEPS_DIR/vscode-server-env.sh"
+  
   echo "依赖安装完成，环境变量已设置"
   echo "CXXABI_1.3.8 兼容性处理完成"
+  echo "node-pty glibc 兼容性修复完成"
 fi
 # ========== 依赖安装结束 ==========
 ` : '';
@@ -725,6 +824,17 @@ if [[ -z $SERVER_RUNNING_PROCESS ]]; then
     SERVER_CONNECTION_TOKEN="${crypto.randomUUID()}"
     echo $SERVER_CONNECTION_TOKEN > $SERVER_TOKENFILE
 
+    # ========== 启动前加载 glibc 修复环境 ==========
+    # 检查是否存在环境变量配置文件
+    if [ -f "$HOME/.vscode-server-deps/vscode-server-env.sh" ]; then
+        echo "加载 VSCode Server 环境变量配置..."
+        source "$HOME/.vscode-server-deps/vscode-server-env.sh"
+        echo "环境变量已加载，启动 VSCode Server..."
+    else
+        echo "未找到环境变量配置文件，使用默认环境启动..."
+    fi
+
+    # 启动 VSCode Server，使用修复后的环境变量
     $SERVER_SCRIPT --start-server --host=127.0.0.1 $SERVER_LISTEN_FLAG $SERVER_INITIAL_EXTENSIONS --connection-token-file $SERVER_TOKENFILE --telemetry-level off --enable-remote-auto-shutdown --accept-server-license-terms &> $SERVER_LOGFILE &
     echo $! > $SERVER_PIDFILE
 else

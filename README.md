@@ -1,10 +1,31 @@
 # Open Remote SSH
 
-一个增强的 VS Code Remote-SSH 扩展，支持自定义 glibc 依赖注入和手动指定下载链接。
+一个增强的 VS Code Remote-SSH 扩展，支持自定义 glibc 依赖注入、手动指定下载链接和自动修复 node-pty glibc 兼容性问题。
 
 ## 新功能
 
-### 手动指定下载链接
+### 1. 自动修复 node-pty glibc 兼容性问题
+
+**功能说明：**
+- 自动检测并修复 node-pty 模块的 glibc 版本冲突问题
+- 无需用户手动执行脚本，插件自动处理
+- 支持智能检测和按需修复
+
+**配置方式：**
+```json
+{
+    "remote.SSH.enableCustomGlibc": true
+}
+```
+
+**解决的问题：**
+- VSCode 1.86+ 版本中的 `GLIBC_2.28` 版本要求问题
+- node-pty 模块的 `__tunable_get_val` 符号版本冲突
+- 旧版本 Linux 系统的兼容性问题
+
+**详细文档：** [node-pty glibc 修复指南](docs/node-pty-glibc-fix.md)
+
+### 2. 手动指定下载链接
 
 除了默认的 `serverDownloadUrlTemplate` 配置外，现在还可以通过 `remote.SSH.serverDownloadUrl` 设置手动指定完整的下载链接。
 
