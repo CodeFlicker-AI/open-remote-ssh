@@ -594,11 +594,6 @@ if [[ ! -f $SERVER_SCRIPT ]]; then
         print_install_results_and_exit 1 "Error while extracting server contents"
     fi
 
-    if [[ ! -f $SERVER_SCRIPT ]]; then
-        echo "Error server contents are corrupted"
-        print_install_results_and_exit 1 "Error server contents are corrupted"
-    fi
-
     rm -f vscode-server.tar.gz
 
     popd > /dev/null

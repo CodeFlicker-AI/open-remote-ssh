@@ -2,7 +2,7 @@
 	"name": "open-remote-ssh",
 	"displayName": "Open Remote - SSH for CodeFlicker",
 	"description": "Use any remote machine with a SSH server as your development environment.",
-	"version": "0.0.64",
+	"version": "0.0.65",
 	"publisher": "CodeFlicker-AI",
 	"repository": {
 		"type": "git",
