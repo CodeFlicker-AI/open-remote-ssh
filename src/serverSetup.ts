@@ -44,7 +44,8 @@ export class ServerInstallError extends Error {
     }
 }
 
-const DEFAULT_DOWNLOAD_URL_TEMPLATE = 'https://cdnfile.corp.kuaishou.com/kc/files/a/kwaipilot/vscodium/vscode-reh-${os}-${arch}-${version}.tar.gz';
+const DEFAULT_DOWNLOAD_URL_TEMPLATE = 'https://h2.static.yximgs.com/kcdn/cdn-kcdn112115/vscodium/vscode-reh-${os}-${arch}-${version}.tar.gz';
+
 
 export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTemplate: string | undefined, serverDownloadUrl: string | undefined, extensionIds: string[], envVariables: string[], platform: string | undefined, useSocketPath: boolean, logger: Log): Promise<ServerInstallResult> {
     let shell = 'powershell';
@@ -583,7 +584,11 @@ if [[ ! -f $SERVER_SCRIPT ]]; then
         print_install_results_and_exit 1 "Error downloading server from $SERVER_DOWNLOAD_URL"
     fi
 
+    sleep 3
+    file vscode-server.tar.gz
+    gzip -t vscode-server.tar.gz
     tar -xf vscode-server.tar.gz --strip-components 1
+
     if (( $? > 0 )); then
         echo "Error while extracting server contents"
         print_install_results_and_exit 1 "Error while extracting server contents"
