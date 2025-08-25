@@ -45,7 +45,7 @@ export class ServerInstallError extends Error {
     }
 }
 
-const DEFAULT_DOWNLOAD_URL_TEMPLATE = 'https://h2.static.yximgs.com/kcdn/cdn-kcdn112115/vscodium/vscode-reh-${os}-${arch}-${version}.tar.gz';
+
 
 
 export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTemplate: string | undefined, serverDownloadUrl: string | undefined, extensionIds: string[], envVariables: string[], platform: string | undefined, useSocketPath: boolean, logger: Log): Promise<ServerInstallResult> {
@@ -102,6 +102,23 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
         
         logger.info(`根据 vscode.versionType (${versionType}) 设置 enableCustomGlibc 默认值: ${enableCustomGlibc}`);
     }
+
+    // 根据 vscode.versionType 动态选择下载地址模板
+    const getDownloadUrlTemplate = (): string => {
+        // 安全地获取 versionType，如果不存在则使用默认值
+        const versionType = (vscode as any).versionType;
+        
+        if (versionType === 'External') {
+            // External 版本使用 codeflicker 地址
+            return 'https://h2.static.yximgs.com/kcdn/cdn-kcdn112115/codeflicker/vscode-reh-${os}-${arch}-${version}.tar.gz';
+        } else {
+            // 其他版本使用默认的 vscodium 地址
+            return 'https://h2.static.yximgs.com/kcdn/cdn-kcdn112115/vscodium/vscode-reh-${os}-${arch}-${version}.tar.gz';
+        }
+    };
+
+    const DEFAULT_DOWNLOAD_URL_TEMPLATE = getDownloadUrlTemplate();
+
     const installOptions: ServerInstallOptions = {
         id: scriptId,
         version: vscodeServerConfig.version,
