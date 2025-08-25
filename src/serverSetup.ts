@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import Log from './common/logger';
 import { getVSCodeServerConfig } from './serverConfig';
 import SSHConnection from './ssh/sshConnection';
+import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -86,6 +87,21 @@ export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTe
     const gccUrl = remoteSSHconfig.get('customGccUrl');
     const patchelfUrl = remoteSSHconfig.get('customPatchelfUrl');
     let enableCustomGlibc = remoteSSHconfig.get('enableCustomGlibc');
+    
+    // 根据 vscode.versionType 动态设置 enableCustomGlibc 的默认值
+    // 当 versionType === 'External' 时，默认值为 false；其他情况默认值为 true
+    if (enableCustomGlibc === undefined) {
+        // @ts-ignore
+        const versionType = vscode.versionType;
+        
+        if (versionType === 'External') {
+            enableCustomGlibc = false;
+        } else {
+            enableCustomGlibc = true;
+        }
+        
+        logger.info(`根据 vscode.versionType (${versionType}) 设置 enableCustomGlibc 默认值: ${enableCustomGlibc}`);
+    }
     const installOptions: ServerInstallOptions = {
         id: scriptId,
         version: vscodeServerConfig.version,
