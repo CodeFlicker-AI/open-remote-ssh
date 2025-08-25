@@ -2,7 +2,7 @@
 	"name": "open-remote-ssh",
 	"displayName": "Open Remote - SSH for CodeFlicker",
 	"description": "Use any remote machine with a SSH server as your development environment.",
-	"version": "0.0.67",
+	"version": "0.0.68",
 	"publisher": "CodeFlicker-AI",
 	"repository": {
 		"type": "git",
@@ -122,7 +122,8 @@
 				"remote.SSH.serverDownloadUrl": {
 					"type": "string",
 					"description": "完整的 vscode server 下载链接。如果设置了此选项，将优先使用此链接进行下载。此链接应该是完整的、可直接使用的下载地址。",
-					"scope": "application"
+					"scope": "application",
+					"default": ""
 				}
 			}
 		},

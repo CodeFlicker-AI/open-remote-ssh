@@ -30,7 +30,7 @@ function logConfigurationChange(e: vscode.ConfigurationChangeEvent, logger: Log)
   
   const affectedConfigs = glibcConfigs.filter(config => e.affectsConfiguration(config));
   if (affectedConfigs.length > 0) {
-    logger.info(`检测到 GLIBC 相关配置变更: ${affectedConfigs.join(', ')}`);
+    logger.info(`检测到 GLIBC 相关配置变更事件: ${affectedConfigs.join(', ')}`);
   }
 }
 
@@ -44,6 +44,59 @@ function getCurrentGlibcConfig() {
     customPatchelfUrl: config.get('customPatchelfUrl'),
     serverDownloadUrl: config.get('serverDownloadUrl'),
   };
+}
+
+// 深度比较两个配置对象，忽略 undefined 和 null 的差异
+function isGlibcConfigActuallyChanged(oldConfig: any, newConfig: any): boolean {
+  if (!oldConfig || !newConfig) {
+    return oldConfig !== newConfig;
+  }
+
+  const keys = ['enableCustomGlibc', 'customGlibcUrl', 'customGccUrl', 'customPatchelfUrl', 'serverDownloadUrl'];
+  
+  for (const key of keys) {
+    const oldValue = oldConfig[key];
+    const newValue = newConfig[key];
+    
+    // 处理 undefined 和 null 的情况
+    if (oldValue === undefined && newValue === undefined) continue;
+    if (oldValue === null && newValue === null) continue;
+    if (oldValue === undefined && newValue === null) continue;
+    if (oldValue === null && newValue === undefined) continue;
+    
+    // 如果其中一个值是 undefined 或 null，另一个不是，则认为发生了变化
+    if ((oldValue === undefined || oldValue === null) !== (newValue === undefined || newValue === null)) {
+      return true;
+    }
+    
+    // 比较实际值
+    if (oldValue !== newValue) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// 记录配置变更的详细信息
+function logConfigChangeDetails(oldConfig: any, newConfig: any, logger: Log) {
+  const keys = ['enableCustomGlibc', 'customGlibcUrl', 'customGccUrl', 'customPatchelfUrl', 'serverDownloadUrl'];
+  const changes: string[] = [];
+  
+  for (const key of keys) {
+    const oldValue = oldConfig?.[key];
+    const newValue = newConfig?.[key];
+    
+    if (oldValue !== newValue) {
+      changes.push(`${key}: ${JSON.stringify(oldValue)} → ${JSON.stringify(newValue)}`);
+    }
+  }
+  
+  if (changes.length > 0) {
+    logger.info(`GLIBC 配置发生实际变更:\n${changes.join('\n')}`);
+  } else {
+    logger.info('GLIBC 配置变更事件触发，但配置值未发生实际变化。');
+  }
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -74,10 +127,15 @@ export async function activate(context: vscode.ExtensionContext) {
       // 添加调试日志
       logConfigurationChange(e, logger);
       
-      if (isGlibcConfigChanged(e)) {
+      if (isGlibcConfigChanged(e) && (vscode as any).versionType !== 'External') {
         const lastConfig = context.globalState.get<any>('openRemoteSsh.lastGlibcConfig');
         const currentConfig = getCurrentGlibcConfig();
-        if (!lastConfig || JSON.stringify(lastConfig) !== JSON.stringify(currentConfig)) {
+        
+        // 使用精确的配置比较函数
+        if (isGlibcConfigActuallyChanged(lastConfig, currentConfig)) {
+          // 记录配置变更的详细信息
+          logConfigChangeDetails(lastConfig, currentConfig, logger);
+          
           await context.globalState.update('openRemoteSsh.needReinstallServer', true);
           await context.globalState.update('openRemoteSsh.lastGlibcConfig', currentConfig);
           vscode.window.showInformationMessage('GLIBC 相关配置已变更，重启 VSCode 后将自动重新安装 server。');
