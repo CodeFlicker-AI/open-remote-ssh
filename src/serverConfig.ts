@@ -13,27 +13,30 @@ async function getVSCodeProductJson() {
 }
 
 export interface IServerConfig {
-    version: string;
-    commit: string;
-    quality: string;
-    release?: string; // vscodium-like specific
-    serverApplicationName: string;
-    serverDataFolderName: string;
-    serverDownloadUrlTemplate?: string; // vscodium-like specific
+  version: string;
+  commit: string;
+  quality: string;
+  release?: string; // vscodium-like specific
+  serverApplicationName: string;
+  serverDataFolderName: string;
+  serverDownloadUrl?: string;
 }
 
 export async function getVSCodeServerConfig(): Promise<IServerConfig> {
-    const productJson = await getVSCodeProductJson();
+  const productJson = await getVSCodeProductJson();
 
-    const customServerBinaryName = vscode.workspace.getConfiguration('remote.SSH.experimental').get<string>('serverBinaryName', '');
+  const customServerBinaryName = vscode.workspace
+    .getConfiguration('remote.SSH.experimental')
+    .get<string>('serverBinaryName', '');
 
-    return {
-        version: vscode.version.replace('-insider',''),
-        commit: productJson.commit,
-        quality: productJson.quality,
-        release: productJson.release,
-        serverApplicationName: customServerBinaryName || productJson.serverApplicationName,
-        serverDataFolderName: productJson.serverDataFolderName,
-        serverDownloadUrlTemplate: productJson.serverDownloadUrlTemplate
-    };
+  return {
+    version: vscode.version.replace('-insider', ''),
+    commit: productJson.commit,
+    quality: productJson.quality,
+    release: productJson.release,
+    serverApplicationName:
+      customServerBinaryName || productJson.serverApplicationName,
+    serverDataFolderName: productJson.serverDataFolderName,
+    serverDownloadUrl: productJson.serverDownloadUrl,
+  };
 }

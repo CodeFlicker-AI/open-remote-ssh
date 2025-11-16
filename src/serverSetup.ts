@@ -4,17 +4,17 @@ import { getVSCodeServerConfig } from './serverConfig';
 import SSHConnection from './ssh/sshConnection';
 
 export interface ServerInstallOptions {
-    id: string;
-    quality: string;
-    commit: string;
-    version: string;
-    release?: string; // vscodium specific
-    extensionIds: string[];
-    envVariables: string[];
-    useSocketPath: boolean;
-    serverApplicationName: string;
-    serverDataFolderName: string;
-    serverDownloadUrlTemplate: string;
+  id: string;
+  quality: string;
+  commit: string;
+  version: string;
+  release?: string; // vscodium specific
+  extensionIds: string[];
+  envVariables: string[];
+  useSocketPath: boolean;
+  serverApplicationName: string;
+  serverDataFolderName: string;
+  serverDownloadUrl: string;
 }
 
 export interface ServerInstallResult {
@@ -35,141 +35,185 @@ export class ServerInstallError extends Error {
     }
 }
 
-const DEFAULT_DOWNLOAD_URL_TEMPLATE = 'https://github.com/VSCodium/vscodium/releases/download/${version}.${release}/vscodium-reh-${os}-${arch}-${version}.${release}.tar.gz';
+const DEFAULT_DOWNLOAD_URL =
+  'https://h2.static.yximgs.com/kcdn/cdn-kcdn112115/vscodium/vscode-reh-linux-x64-1.101.2.tar.gz';
 
-export async function installCodeServer(conn: SSHConnection, serverDownloadUrlTemplate: string | undefined, extensionIds: string[], envVariables: string[], platform: string | undefined, useSocketPath: boolean, logger: Log): Promise<ServerInstallResult> {
-    let shell = 'powershell';
+export async function installCodeServer(
+  conn: SSHConnection,
+  serverDownloadUrl: string | undefined,
+  extensionIds: string[],
+  envVariables: string[],
+  platform: string | undefined,
+  useSocketPath: boolean,
+  logger: Log,
+): Promise<ServerInstallResult> {
+  let shell = 'powershell';
 
-    // detect platform and shell for windows
-    if (!platform || platform === 'windows') {
-        const result = await conn.exec('uname -s');
+  // detect platform and shell for windows
+  if (!platform || platform === 'windows') {
+    const result = await conn.exec('uname -s');
 
-        if (result.stdout) {
-            if (result.stdout.includes('windows32')) {
-                platform = 'windows';
-            } else if (result.stdout.includes('MINGW64')) {
-                platform = 'windows';
-                shell = 'bash';
-            }
-        } else if (result.stderr) {
-            if (result.stderr.includes('FullyQualifiedErrorId : CommandNotFoundException')) {
-                platform = 'windows';
-            }
+    if (result.stdout) {
+      if (result.stdout.includes('windows32')) {
+        platform = 'windows';
+      } else if (result.stdout.includes('MINGW64')) {
+        platform = 'windows';
+        shell = 'bash';
+      }
+    } else if (result.stderr) {
+      if (
+        result.stderr.includes(
+          'FullyQualifiedErrorId : CommandNotFoundException',
+        )
+      ) {
+        platform = 'windows';
+      }
 
-            if (result.stderr.includes('is not recognized as an internal or external command')) {
-                platform = 'windows';
-                shell = 'cmd';
-            }
-        }
-
-        if (platform) {
-            logger.trace(`Detected platform: ${platform}, ${shell}`);
-        }
+      if (
+        result.stderr.includes(
+          'is not recognized as an internal or external command',
+        )
+      ) {
+        platform = 'windows';
+        shell = 'cmd';
+      }
     }
 
-    const scriptId = crypto.randomBytes(12).toString('hex');
+    if (platform) {
+      logger.trace(`Detected platform: ${platform}, ${shell}`);
+    }
+  }
 
-    const vscodeServerConfig = await getVSCodeServerConfig();
-    const installOptions: ServerInstallOptions = {
-        id: scriptId,
-        version: vscodeServerConfig.version,
-        commit: vscodeServerConfig.commit,
-        quality: vscodeServerConfig.quality,
-        release: vscodeServerConfig.release,
-        extensionIds,
-        envVariables,
-        useSocketPath,
-        serverApplicationName: vscodeServerConfig.serverApplicationName,
-        serverDataFolderName: vscodeServerConfig.serverDataFolderName,
-        serverDownloadUrlTemplate: serverDownloadUrlTemplate || vscodeServerConfig.serverDownloadUrlTemplate || DEFAULT_DOWNLOAD_URL_TEMPLATE,
-    };
+  const scriptId = crypto.randomBytes(12).toString('hex');
 
-    let commandOutput: { stdout: string; stderr: string };
-    if (platform === 'windows') {
-        const installServerScript = generatePowerShellInstallScript(installOptions);
+  const vscodeServerConfig = await getVSCodeServerConfig();
+  const installOptions: ServerInstallOptions = {
+    id: scriptId,
+    version: vscodeServerConfig.version,
+    commit: vscodeServerConfig.commit,
+    quality: vscodeServerConfig.quality,
+    release: vscodeServerConfig.release,
+    extensionIds,
+    envVariables,
+    useSocketPath,
+    serverApplicationName: vscodeServerConfig.serverApplicationName,
+    serverDataFolderName: vscodeServerConfig.serverDataFolderName,
+    serverDownloadUrl:
+      serverDownloadUrl ||
+      vscodeServerConfig.serverDownloadUrl ||
+      DEFAULT_DOWNLOAD_URL,
+  };
 
-        logger.trace('Server install command:', installServerScript);
+  let commandOutput: { stdout: string; stderr: string };
+  if (platform === 'windows') {
+    const installServerScript = generatePowerShellInstallScript(installOptions);
 
-        const installDir = `$HOME\\${vscodeServerConfig.serverDataFolderName}\\install`;
-        const installScript = `${installDir}\\${vscodeServerConfig.commit}.ps1`;
-        const endRegex = new RegExp(`${scriptId}: end`);
-        // investigate if it's possible to use `-EncodedCommand` flag
-        // https://devblogs.microsoft.com/powershell/invoking-powershell-with-complex-expressions-using-scriptblocks/
-        let command = '';
-        if (shell === 'powershell') {
-            command = `md -Force ${installDir}; echo @'\n${installServerScript}\n'@ | Set-Content ${installScript}; powershell -ExecutionPolicy ByPass -File "${installScript}"`;
-        } else if (shell === 'bash') {
-            command = `mkdir -p ${installDir.replace(/\\/g, '/')} && echo '\n${installServerScript.replace(/'/g, '\'"\'"\'')}\n' > ${installScript.replace(/\\/g, '/')} && powershell -ExecutionPolicy ByPass -File "${installScript}"`;
-        } else if (shell === 'cmd') {
-            const script = installServerScript.trim()
-                // remove comments
-                .replace(/^#.*$/gm, '')
-                // remove empty lines
-                .replace(/\n{2,}/gm, '\n')
-                // remove leading spaces
-                .replace(/^\s*/gm, '')
-                // escape double quotes (from powershell/cmd)
-                .replace(/"/g, '"""')
-                // escape single quotes (from cmd)
-                .replace(/'/g, `''`)
-                // escape redirect (from cmd)
-                .replace(/>/g, `^>`)
-                // escape new lines (from powershell/cmd)
-                .replace(/\n/g, '\'`n\'');
+    logger.trace('Server install command:', installServerScript);
 
-            command = `powershell "md -Force ${installDir}" && powershell "echo '${script}'" > ${installScript.replace('$HOME', '%USERPROFILE%')} && powershell -ExecutionPolicy ByPass -File "${installScript.replace('$HOME', '%USERPROFILE%')}"`;
+    const installDir = `$HOME\\${vscodeServerConfig.serverDataFolderName}\\install`;
+    const installScript = `${installDir}\\${vscodeServerConfig.commit}.ps1`;
+    const endRegex = new RegExp(`${scriptId}: end`);
+    // investigate if it's possible to use `-EncodedCommand` flag
+    // https://devblogs.microsoft.com/powershell/invoking-powershell-with-complex-expressions-using-scriptblocks/
+    let command = '';
+    if (shell === 'powershell') {
+      command = `md -Force ${installDir}; echo @'\n${installServerScript}\n'@ | Set-Content ${installScript}; powershell -ExecutionPolicy ByPass -File "${installScript}"`;
+    } else if (shell === 'bash') {
+      command = `mkdir -p ${installDir.replace(
+        /\\/g,
+        '/',
+      )} && echo '\n${installServerScript.replace(
+        /'/g,
+        "'\"'\"'",
+      )}\n' > ${installScript.replace(
+        /\\/g,
+        '/',
+      )} && powershell -ExecutionPolicy ByPass -File "${installScript}"`;
+    } else if (shell === 'cmd') {
+      const script = installServerScript
+        .trim()
+        // remove comments
+        .replace(/^#.*$/gm, '')
+        // remove empty lines
+        .replace(/\n{2,}/gm, '\n')
+        // remove leading spaces
+        .replace(/^\s*/gm, '')
+        // escape double quotes (from powershell/cmd)
+        .replace(/"/g, '"""')
+        // escape single quotes (from cmd)
+        .replace(/'/g, `''`)
+        // escape redirect (from cmd)
+        .replace(/>/g, `^>`)
+        // escape new lines (from powershell/cmd)
+        .replace(/\n/g, "'`n'");
 
-            logger.trace('Command length (8191 max):', command.length);
+      command = `powershell "md -Force ${installDir}" && powershell "echo '${script}'" > ${installScript.replace(
+        '$HOME',
+        '%USERPROFILE%',
+      )} && powershell -ExecutionPolicy ByPass -File "${installScript.replace(
+        '$HOME',
+        '%USERPROFILE%',
+      )}"`;
 
-            if (command.length > 8191) {
-                throw new ServerInstallError(`Command line too long`);
-            }
-        } else {
-            throw new ServerInstallError(`Not supported shell: ${shell}`);
-        }
+      logger.trace('Command length (8191 max):', command.length);
 
-        commandOutput = await conn.execPartial(command, (stdout: string) => endRegex.test(stdout));
+      if (command.length > 8191) {
+        throw new ServerInstallError(`Command line too long`);
+      }
     } else {
-        const installServerScript = generateBashInstallScript(installOptions);
-
-        logger.trace('Server install command:', installServerScript);
-        // Fish shell does not support heredoc so let's workaround it using -c option,
-        // also replace single quotes (') within the script with ('\'') as there's no quoting within single quotes, see https://unix.stackexchange.com/a/24676
-        commandOutput = await conn.exec(`bash -c '${installServerScript.replace(/'/g, `'\\''`)}'`);
+      throw new ServerInstallError(`Not supported shell: ${shell}`);
     }
 
-    if (commandOutput.stderr) {
-        logger.trace('Server install command stderr:', commandOutput.stderr);
-    }
-    logger.trace('Server install command stdout:', commandOutput.stdout);
+    commandOutput = await conn.execPartial(command, (stdout: string) =>
+      endRegex.test(stdout),
+    );
+  } else {
+    const installServerScript = generateBashInstallScript(installOptions);
 
-    const resultMap = parseServerInstallOutput(commandOutput.stdout, scriptId);
-    if (!resultMap) {
-        throw new ServerInstallError(`Failed parsing install script output`);
-    }
+    logger.trace('Server install command:', installServerScript);
+    // Fish shell does not support heredoc so let's workaround it using -c option,
+    // also replace single quotes (') within the script with ('\'') as there's no quoting within single quotes, see https://unix.stackexchange.com/a/24676
+    commandOutput = await conn.exec(
+      `bash -c '${installServerScript.replace(/'/g, `'\\''`)}'`,
+    );
+  }
 
-    const exitCode = parseInt(resultMap.exitCode, 10);
-    if (exitCode !== 0) {
-        throw new ServerInstallError(`Couldn't install vscode server on remote server, install script returned non-zero exit status`);
-    }
+  if (commandOutput.stderr) {
+    logger.trace('Server install command stderr:', commandOutput.stderr);
+  }
+  logger.trace('Server install command stdout:', commandOutput.stdout);
 
-    const listeningOn = resultMap.listeningOn.match(/^\d+$/)
-        ? parseInt(resultMap.listeningOn, 10)
-        : resultMap.listeningOn;
+  const resultMap = parseServerInstallOutput(commandOutput.stdout, scriptId);
+  if (!resultMap) {
+    throw new ServerInstallError(`Failed parsing install script output`);
+  }
 
-    const remoteEnvVars = Object.fromEntries(Object.entries(resultMap).filter(([key,]) => envVariables.includes(key)));
+  const exitCode = parseInt(resultMap.exitCode, 10);
+  if (exitCode !== 0) {
+    throw new ServerInstallError(
+      `Couldn't install vscode server on remote server, install script returned non-zero exit status`,
+    );
+  }
 
-    return {
-        exitCode,
-        listeningOn,
-        connectionToken: resultMap.connectionToken,
-        logFile: resultMap.logFile,
-        osReleaseId: resultMap.osReleaseId,
-        arch: resultMap.arch,
-        platform: resultMap.platform,
-        tmpDir: resultMap.tmpDir,
-        ...remoteEnvVars
-    };
+  const listeningOn = resultMap.listeningOn.match(/^\d+$/)
+    ? parseInt(resultMap.listeningOn, 10)
+    : resultMap.listeningOn;
+
+  const remoteEnvVars = Object.fromEntries(
+    Object.entries(resultMap).filter(([key]) => envVariables.includes(key)),
+  );
+
+  return {
+    exitCode,
+    listeningOn,
+    connectionToken: resultMap.connectionToken,
+    logFile: resultMap.logFile,
+    osReleaseId: resultMap.osReleaseId,
+    arch: resultMap.arch,
+    platform: resultMap.platform,
+    tmpDir: resultMap.tmpDir,
+    ...remoteEnvVars,
+  };
 }
 
 function parseServerInstallOutput(str: string, scriptId: string): { [k: string]: string } | undefined {
@@ -198,9 +242,23 @@ function parseServerInstallOutput(str: string, scriptId: string): { [k: string]:
     return resultMap;
 }
 
-function generateBashInstallScript({ id, quality, version, commit, release, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, serverDownloadUrlTemplate }: ServerInstallOptions) {
-    const extensions = extensionIds.map(id => '--install-extension ' + id).join(' ');
-    return `
+function generateBashInstallScript({
+  id,
+  quality,
+  version,
+  commit,
+  release,
+  extensionIds,
+  envVariables,
+  useSocketPath,
+  serverApplicationName,
+  serverDataFolderName,
+  serverDownloadUrl,
+}: ServerInstallOptions) {
+  const extensions = extensionIds
+    .map((id) => '--install-extension ' + id)
+    .join(' ');
+  return `
 # Server installation script
 
 TMP_DIR="\${XDG_RUNTIME_DIR:-"/tmp"}"
@@ -212,7 +270,11 @@ DISTRO_VSCODIUM_RELEASE="${release ?? ''}"
 
 SERVER_APP_NAME="${serverApplicationName}"
 SERVER_INITIAL_EXTENSIONS="${extensions}"
-SERVER_LISTEN_FLAG="${useSocketPath ? `--socket-path="$TMP_DIR/vscode-server-sock-${crypto.randomUUID()}"` : '--port=0'}"
+SERVER_LISTEN_FLAG="${
+    useSocketPath
+      ? `--socket-path="$TMP_DIR/vscode-server-sock-${crypto.randomUUID()}"`
+      : '--port=0'
+  }"
 SERVER_DATA_DIR="$HOME/${serverDataFolderName}"
 SERVER_DIR="$SERVER_DATA_DIR/bin/$DISTRO_COMMIT"
 SERVER_SCRIPT="$SERVER_DIR/bin/$SERVER_APP_NAME"
@@ -239,7 +301,7 @@ print_install_results_and_exit() {
     echo "arch==$ARCH=="
     echo "platform==$PLATFORM=="
     echo "tmpDir==$TMP_DIR=="
-    ${envVariables.map(envVar => `echo "${envVar}==$${envVar}=="`).join('\n')}
+    ${envVariables.map((envVar) => `echo "${envVar}==$${envVar}=="`).join('\n')}
     echo "${id}: end"
     exit 0
 }
@@ -318,7 +380,7 @@ if [[ $OS_RELEASE_ID = alpine ]]; then
     PLATFORM=$OS_RELEASE_ID
 fi
 
-SERVER_DOWNLOAD_URL="$(echo "${serverDownloadUrlTemplate.replace(/\$\{/g, '\\${')}" | sed "s/\\\${quality}/$DISTRO_QUALITY/g" | sed "s/\\\${version}/$DISTRO_VERSION/g" | sed "s/\\\${commit}/$DISTRO_COMMIT/g" | sed "s/\\\${os}/$PLATFORM/g" | sed "s/\\\${arch}/$SERVER_ARCH/g" | sed "s/\\\${release}/$DISTRO_VSCODIUM_RELEASE/g")"
+SERVER_DOWNLOAD_URL="${serverDownloadUrl}"
 
 # Check if server script is already installed
 if [[ ! -f $SERVER_SCRIPT ]]; then
@@ -422,17 +484,25 @@ print_install_results_and_exit 0
 `;
 }
 
-function generatePowerShellInstallScript({ id, quality, version, commit, release, extensionIds, envVariables, useSocketPath, serverApplicationName, serverDataFolderName, serverDownloadUrlTemplate }: ServerInstallOptions) {
-    const extensions = extensionIds.map(id => '--install-extension ' + id).join(' ');
-    const downloadUrl = serverDownloadUrlTemplate
-        .replace(/\$\{quality\}/g, quality)
-        .replace(/\$\{version\}/g, version)
-        .replace(/\$\{commit\}/g, commit)
-        .replace(/\$\{os\}/g, 'win32')
-        .replace(/\$\{arch\}/g, 'x64')
-        .replace(/\$\{release\}/g, release ?? '');
+function generatePowerShellInstallScript({
+  id,
+  quality,
+  version,
+  commit,
+  release,
+  extensionIds,
+  envVariables,
+  useSocketPath,
+  serverApplicationName,
+  serverDataFolderName,
+  serverDownloadUrl,
+}: ServerInstallOptions) {
+  const extensions = extensionIds
+    .map((id) => '--install-extension ' + id)
+    .join(' ');
+  const downloadUrl = serverDownloadUrl;
 
-    return `
+  return `
 # Server installation script
 
 $TMP_DIR="$env:TEMP\\$([System.IO.Path]::GetRandomFileName())"
@@ -445,7 +515,11 @@ $DISTRO_VSCODIUM_RELEASE="${release ?? ''}"
 
 $SERVER_APP_NAME="${serverApplicationName}"
 $SERVER_INITIAL_EXTENSIONS="${extensions}"
-$SERVER_LISTEN_FLAG="${useSocketPath ? `--socket-path="$TMP_DIR/vscode-server-sock-${crypto.randomUUID()}"` : '--port=0'}"
+$SERVER_LISTEN_FLAG="${
+    useSocketPath
+      ? `--socket-path="$TMP_DIR/vscode-server-sock-${crypto.randomUUID()}"`
+      : '--port=0'
+  }"
 $SERVER_DATA_DIR="$(Resolve-Path ~)\\${serverDataFolderName}"
 $SERVER_DIR="$SERVER_DATA_DIR\\bin\\$DISTRO_COMMIT"
 $SERVER_SCRIPT="$SERVER_DIR\\bin\\$SERVER_APP_NAME.cmd"
@@ -471,7 +545,7 @@ function printInstallResults($code) {
     "arch==$ARCH=="
     "platform==$PLATFORM=="
     "tmpDir==$TMP_DIR=="
-    ${envVariables.map(envVar => `"${envVar}==$${envVar}=="`).join('\n')}
+    ${envVariables.map((envVar) => `"${envVar}==$${envVar}=="`).join('\n')}
     "${id}: end"
 }
 
