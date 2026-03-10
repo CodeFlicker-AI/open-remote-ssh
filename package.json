@@ -2,7 +2,7 @@
 	"name": "open-remote-ssh-codeflicker",
 	"displayName": "Open Remote - SSH CodeFlicker",
 	"description": "Use any remote machine with a SSH server as your development environment.",
-	"version": "0.0.72",
+	"version": "0.0.73",
 	"publisher": "streamlake",
 	"repository": {
 		"type": "git",
@@ -77,8 +77,25 @@
 				"remote.SSH.serverDownloadUrl": {
 					"type": "string",
 					"description": "完整的 vscode server 下载链接。如果设置了此选项，将使用此链接进行下载。此链接应该是完整的、可直接使用的下载地址。",
-					"scope": "application",
-					"default": "https://h2.static.yximgs.com/kcdn/cdn-kcdn112115/vscodium/vscode-reh-linux-x64-1.101.2.tar.gz"
+					"scope": "application"
+				},
+				"remote.SSH.httpProxy": {
+					"type": [
+						"string",
+						"object"
+					],
+					"markdownDescription": "The proxy URL to use for downloading the VS Code server on the remote host. Can be a single URL (string) for all hosts or a map of hostnames to proxy URLs.",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"default": "",
+					"examples": [
+						{
+							"myhost": "http://proxy.example.com:8080",
+							"myhost2": "http://proxy2.example.com"
+						},
+						"http://proxy.example.com:8080"
+					]
 				},
 				"remote.SSH.remotePlatform": {
 					"type": "object",

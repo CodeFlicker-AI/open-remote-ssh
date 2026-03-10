@@ -87,6 +87,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
         const remotePlatformMap = remoteSSHconfig.get<Record<string, string>>('remotePlatform', {});
         const remoteServerListenOnSocket = remoteSSHconfig.get<boolean>('remoteServerListenOnSocket', false)!;
         const connectTimeout = remoteSSHconfig.get<number>('connectTimeout', 60)!;
+        const httpProxy = remoteSSHconfig.get<string | Record<string, string>>('httpProxy', '');
 
         return vscode.window.withProgress({
             title: `Setting up SSH Host ${sshDest.hostname}`,
@@ -192,6 +193,15 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                     envVariables['SSH_AUTH_SOCK'] = null;
                 }
 
+                // Resolve httpProxy for the specific host
+                let hostHttpProxy: string | undefined;
+                if (typeof httpProxy === 'string') {
+                    hostHttpProxy = httpProxy || undefined;
+                } else if (typeof httpProxy === 'object' && httpProxy !== null) {
+                    // httpProxy is a map of hostname to proxy URL
+                    hostHttpProxy = httpProxy[sshDest.hostname] || httpProxy[sshHostName];
+                }
+
                 const installResult = await installCodeServer(
                   this.sshConnection,
                   serverDownloadUrl,
@@ -199,6 +209,7 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                   Object.keys(envVariables),
                   remotePlatformMap[sshDest.hostname],
                   remoteServerListenOnSocket,
+                  hostHttpProxy,
                   this.logger,
                 );
 

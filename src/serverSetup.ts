@@ -15,6 +15,7 @@ export interface ServerInstallOptions {
   serverApplicationName: string;
   serverDataFolderName: string;
   serverDownloadUrl: string;
+  httpProxy?: string;
 }
 
 export interface ServerInstallResult {
@@ -36,7 +37,7 @@ export class ServerInstallError extends Error {
 }
 
 const DEFAULT_DOWNLOAD_URL =
-  'https://h2.static.yximgs.com/kcdn/cdn-kcdn112115/vscodium/vscode-reh-linux-x64-1.101.2.tar.gz';
+  'https://h4.static.yximgs.com/kcdn/cdn-kcdn112115/codeflicker/vscode-reh-linux-x64-1.101.2.tar.gz';
 
 export async function installCodeServer(
   conn: SSHConnection,
@@ -45,6 +46,7 @@ export async function installCodeServer(
   envVariables: string[],
   platform: string | undefined,
   useSocketPath: boolean,
+  httpProxy: string | undefined,
   logger: Log,
 ): Promise<ServerInstallResult> {
   let shell = 'powershell';
@@ -102,6 +104,7 @@ export async function installCodeServer(
       serverDownloadUrl ||
       vscodeServerConfig.serverDownloadUrl ||
       DEFAULT_DOWNLOAD_URL,
+    httpProxy,
   };
 
   let commandOutput: { stdout: string; stderr: string };
@@ -254,15 +257,21 @@ function generateBashInstallScript({
   serverApplicationName,
   serverDataFolderName,
   serverDownloadUrl,
+  httpProxy,
 }: ServerInstallOptions) {
   const extensions = extensionIds
     .map((id) => '--install-extension ' + id)
     .join(' ');
+  const proxyConfig = httpProxy ? `
+# Set proxy environment variables for downloading
+[ -z "\${http_proxy}" ] && export http_proxy="${httpProxy}"
+[ -z "\${https_proxy}" ] && export https_proxy="${httpProxy}"
+` : '';
   return `
 # Server installation script
 
-TMP_DIR="\${XDG_RUNTIME_DIR:-"/tmp"}"
-
+TMP_DIR="\${XDG_RUNTIME_DIR:-\"/tmp\"}"
+${proxyConfig}
 DISTRO_VERSION="${version}"
 DISTRO_COMMIT="${commit}"
 DISTRO_QUALITY="${quality}"
@@ -382,6 +391,59 @@ fi
 
 SERVER_DOWNLOAD_URL="${serverDownloadUrl}"
 
+# Try to use internal CDN if available
+INTERNAL_CDN_HOST="cdnfile.corp.kuaishou.com"
+
+# Function to check if host is reachable
+check_host_reachable() {
+    local host="$1"
+    # Try multiple methods to check if host is reachable
+    if command -v host >/dev/null 2>&1; then
+        host "$host" >/dev/null 2>&1
+        return $?
+    elif command -v nslookup >/dev/null 2>&1; then
+        nslookup "$host" >/dev/null 2>&1
+        return $?
+    elif command -v getent >/dev/null 2>&1; then
+        getent hosts "$host" >/dev/null 2>&1
+        return $?
+    elif command -v ping >/dev/null 2>&1; then
+        ping -c 1 -W 2 "$host" >/dev/null 2>&1
+        return $?
+    fi
+    return 1
+}
+
+# Function to check if URL is accessible
+check_url_accessible() {
+    local url="$1"
+    if command -v curl >/dev/null 2>&1; then
+        curl -I -s --connect-timeout 5 --max-time 10 "$url" >/dev/null 2>&1
+        return $?
+    elif command -v wget >/dev/null 2>&1; then
+        wget --spider --timeout=5 --tries=1 "$url" >/dev/null 2>&1
+        return $?
+    fi
+    return 1
+}
+
+# Check if internal CDN is available and use it if the URL is accessible
+if check_host_reachable "$INTERNAL_CDN_HOST"; then
+    # Extract original host from SERVER_DOWNLOAD_URL
+    ORIGINAL_HOST=$(echo "$SERVER_DOWNLOAD_URL" | sed -E 's|^https?://([^/]+).*|\\1|')
+    if [[ -n "$ORIGINAL_HOST" && "$ORIGINAL_HOST" != "$INTERNAL_CDN_HOST" ]]; then
+        # Replace host with internal CDN host
+        INTERNAL_URL=$(echo "$SERVER_DOWNLOAD_URL" | sed "s|$ORIGINAL_HOST|$INTERNAL_CDN_HOST|")
+        # Test if internal URL is accessible
+        if check_url_accessible "$INTERNAL_URL"; then
+            echo "Using internal CDN: $INTERNAL_URL"
+            SERVER_DOWNLOAD_URL="$INTERNAL_URL"
+        else
+            echo "Internal CDN not accessible, using original URL"
+        fi
+    fi
+fi
+
 # Check if server script is already installed
 if [[ ! -f $SERVER_SCRIPT ]]; then
     case "$PLATFORM" in
@@ -496,6 +558,7 @@ function generatePowerShellInstallScript({
   serverApplicationName,
   serverDataFolderName,
   serverDownloadUrl,
+  httpProxy,
 }: ServerInstallOptions) {
   const extensions = extensionIds
     .map((id) => '--install-extension ' + id)
@@ -587,7 +650,8 @@ if(!(Test-Path $SERVER_SCRIPT)) {
         TimeoutSec=20
         OutFile="vscode-server.tar.gz"
         UseBasicParsing=$True
-    }
+${httpProxy ? `        Proxy="${httpProxy}"
+` : ''}    }
 
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
