@@ -64,6 +64,7 @@ export default class SSHConnection extends EventEmitter {
     private __retries: number = 0;
     private __err: Error & ClientErrorExtensions & { code?: string } | null = null;
     private sshConnection: Client | null = null;
+    private __tunnelConnectionSeq = 0;
 
     constructor(options: SSHConnectConfig) {
         super();
@@ -256,6 +257,18 @@ export default class SSHConnection extends EventEmitter {
         return this.activeTunnels[name];
     }
 
+    private describeSocket(socket: net.Socket): string {
+        const remoteAddress = socket.remoteAddress || 'unknown';
+        const remotePort = socket.remotePort || 'unknown';
+        const localAddress = socket.localAddress || 'unknown';
+        const localPort = socket.localPort || 'unknown';
+        return `${remoteAddress}:${remotePort} -> ${localAddress}:${localPort}`;
+    }
+
+    private emitTunnelDisconnect(SSHTunnelConfig: SSHTunnelConfig, err: any, details: Record<string, unknown> = {}) {
+        this.emit(SSHConstants.CHANNEL.TUNNEL, SSHConstants.STATUS.DISCONNECT, Object.assign({ SSHTunnelConfig: SSHTunnelConfig, err: err }, details));
+    }
+
     /**
      * Add new tunnel if not exist
      */
@@ -279,7 +292,11 @@ export default class SSHConnection extends EventEmitter {
                                     destination.port,
                                     (err, stream) => {
                                         if (err) {
-                                            this.emit(SSHConstants.CHANNEL.TUNNEL, SSHConstants.STATUS.DISCONNECT, { SSHTunnelConfig: SSHTunnelConfig, err: err });
+                                            this.emitTunnelDisconnect(SSHTunnelConfig, err, {
+                                                forwardingType: 'socks-direct-tcpip',
+                                                localConnection: `${origin.address}:${origin.port}`,
+                                                remoteTarget: `${destination.address}:${destination.port}`
+                                            });
                                             return callback(err);
                                         }
                                         return callback(null, stream);
@@ -292,26 +309,56 @@ export default class SSHConnection extends EventEmitter {
                 } else {
                     server = net.createServer()
                         .on('connection', (socket) => {
+                            const connectionId = ++this.__tunnelConnectionSeq;
+                            const localConnection = this.describeSocket(socket);
+                            const remoteTarget = SSHTunnelConfig.remotePort
+                                ? `${SSHTunnelConfig.remoteAddr}:${SSHTunnelConfig.remotePort}`
+                                : SSHTunnelConfig.remoteSocketPath!;
+                            const closeSocket = () => {
+                                if (!socket.destroyed) {
+                                    socket.destroy();
+                                }
+                            };
                             this.connect().then(() => {
                                 if (SSHTunnelConfig.remotePort) {
-                                    this.sshConnection!.forwardOut('127.0.0.1', 0, SSHTunnelConfig.remoteAddr!, SSHTunnelConfig.remotePort!, (err, stream) => {
+                                    this.sshConnection!.forwardOut('127.0.0.1', 0, SSHTunnelConfig.remoteAddr!, SSHTunnelConfig.remotePort!, (err: Error | undefined, sshStream: ClientChannel) => {
                                         if (err) {
-                                            this.emit(SSHConstants.CHANNEL.TUNNEL, SSHConstants.STATUS.DISCONNECT, { SSHTunnelConfig: SSHTunnelConfig, err: err });
+                                            this.emitTunnelDisconnect(SSHTunnelConfig, err, {
+                                                connectionId,
+                                                forwardingType: 'direct-tcpip',
+                                                localConnection,
+                                                remoteTarget
+                                            });
+                                            closeSocket();
                                             return;
                                         }
-                                        stream.pipe(socket);
-                                        socket.pipe(stream);
+                                        sshStream.pipe(socket);
+                                        socket.pipe(sshStream);
                                     });
                                 } else {
-                                    this.sshConnection!.openssh_forwardOutStreamLocal(SSHTunnelConfig.remoteSocketPath!, (err, stream) => {
+                                    this.sshConnection!.openssh_forwardOutStreamLocal(SSHTunnelConfig.remoteSocketPath!, (err: Error | undefined, sshStream: ClientChannel) => {
                                         if (err) {
-                                            this.emit(SSHConstants.CHANNEL.TUNNEL, SSHConstants.STATUS.DISCONNECT, { SSHTunnelConfig: SSHTunnelConfig, err: err });
+                                            this.emitTunnelDisconnect(SSHTunnelConfig, err, {
+                                                connectionId,
+                                                forwardingType: 'direct-streamlocal@openssh.com',
+                                                localConnection,
+                                                remoteTarget
+                                            });
+                                            closeSocket();
                                             return;
                                         }
-                                        stream.pipe(socket);
-                                        socket.pipe(stream);
+                                        sshStream.pipe(socket);
+                                        socket.pipe(sshStream);
                                     });
                                 }
+                            }).catch((err) => {
+                                this.emitTunnelDisconnect(SSHTunnelConfig, err, {
+                                    connectionId,
+                                    forwardingType: 'ssh-connect',
+                                    localConnection,
+                                    remoteTarget
+                                });
+                                closeSocket();
                             });
                         });
                 }

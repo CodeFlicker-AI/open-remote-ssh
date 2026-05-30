@@ -48,6 +48,15 @@ interface SSHKey {
     isPrivate?: boolean;
 }
 
+interface TunnelDisconnectPayload {
+    SSHTunnelConfig?: SSHTunnelConfig;
+    err?: unknown;
+    connectionId?: number;
+    forwardingType?: string;
+    localConnection?: string;
+    remoteTarget?: string;
+}
+
 export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode.Disposable {
 
     private proxyConnections: SSHConnection[] = [];
@@ -332,8 +341,24 @@ export class RemoteSSHResolver implements vscode.RemoteAuthorityResolver, vscode
                 remoteSocketPath,
                 localPort
             });
+            const tunnelErrorLogger = (_connection: SSHConnection, payload: TunnelDisconnectPayload | undefined) => {
+                if (!payload || payload.SSHTunnelConfig?.name !== tunnelConfig.name || !payload.err) {
+                    return;
+                }
+                const connectionId = payload.connectionId ?? 'unknown';
+                const forwardingType = payload.forwardingType ?? (remoteSocketPath ? 'direct-streamlocal@openssh.com' : 'direct-tcpip');
+                const localConnection = payload.localConnection ?? `${tunnelConfig.localPort}(local)`;
+                const remoteTarget = payload.remoteTarget ?? String(remotePortOrSocketPath);
+                this.logger.error(
+                    `Tunnel connection failed: tunnel=${tunnelConfig.name}, connectionId=${connectionId}, ` +
+                    `type=${forwardingType}, local=${localConnection}, remote=${remoteTarget}`,
+                    payload.err
+                );
+            };
+            this.sshConnection!.on('tunnel:disconnect', tunnelErrorLogger);
             disposables.push({
                 dispose: () => {
+                    this.sshConnection?.off('tunnel:disconnect', tunnelErrorLogger);
                     this.sshConnection?.closeTunnel(tunnelConfig.name);
                     this.logger.trace(`Tunnel ${tunnelConfig.name} closed`);
                 }
