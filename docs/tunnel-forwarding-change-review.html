@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>open-remote-ssh tunnel 日志变更确认</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --ink: #1d2733;
+      --muted: #637083;
+      --panel: #ffffff;
+      --line: #d9e1eb;
+      --accent: #265d97;
+      --accent-soft: #e8f1fb;
+      --ok: #17693b;
+      --ok-soft: #e8f6ed;
+      --warn: #8a5a00;
+      --warn-soft: #fff4d8;
+      --risk: #9b1c31;
+      --risk-soft: #fff0f2;
+      --code-bg: #111827;
+      --code-ink: #edf2ff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.62;
+    }
+
+    header {
+      padding: 34px min(6vw, 72px);
+      color: #fff;
+      background: #18324a;
+      border-bottom: 6px solid var(--accent);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(26px, 4vw, 42px);
+      line-height: 1.16;
+      letter-spacing: 0;
+    }
+
+    header p {
+      max-width: 960px;
+      color: #d9e8f7;
+      margin: 10px 0 0;
+    }
+
+    main {
+      width: min(1120px, calc(100vw - 32px));
+      margin: 28px auto 46px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 22px;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+
+    section,
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    section + section {
+      margin-top: 18px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(300px, .62fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .13);
+      border: 1px solid rgba(255, 255, 255, .28);
+      color: #fff;
+      font-size: 13px;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .summary .card {
+      min-height: 122px;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .value {
+      margin-top: 6px;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .comment {
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      padding: 12px 14px;
+      border-radius: 6px;
+      margin: 12px 0;
+    }
+
+    .comment.ok {
+      border-left-color: var(--ok);
+      background: var(--ok-soft);
+    }
+
+    .comment.warning {
+      border-left-color: var(--warn);
+      background: var(--warn-soft);
+    }
+
+    .comment.risk {
+      border-left-color: var(--risk);
+      background: var(--risk-soft);
+    }
+
+    .comment strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: #edf2f7;
+      color: #1d2733;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .92em;
+    }
+
+    pre {
+      margin: 12px 0;
+      overflow: auto;
+      padding: 14px;
+      border-radius: 8px;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .file {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+    }
+
+    .event {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+    }
+
+    .event b {
+      color: var(--accent);
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 20px;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    footer {
+      width: min(1120px, calc(100vw - 32px));
+      margin: 0 auto 32px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 880px) {
+      .grid,
+      .summary {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>open-remote-ssh 变更确认：tunnel per-connection 错误日志</h1>
+    <p>本页用于审阅提交 <code>a3afe5a</code>。目标是解释为什么这个插件仓需要修改，以及这次修改如何帮助其他机器快速确认 streamlocal/TCP tunnel 的真实失败原因。</p>
+    <div class="meta">
+      <span class="pill">仓库：/Users/huyansheng/Documents/2021/open-remote-ssh</span>
+      <span class="pill">提交：fix(ssh): log tunnel forwarding failures</span>
+      <span class="pill">状态：master ahead 1</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="summary">
+      <div class="card">
+        <div class="label">是否需要改</div>
+        <div class="value">需要，属于 P2 可观测性修复</div>
+        <p>不改变默认配置，只让失败日志更直接。</p>
+      </div>
+      <div class="card">
+        <div class="label">默认值</div>
+        <div class="value">保持 <code>false</code></div>
+        <p><code>remote.SSH.remoteServerListenOnSocket</code> 没有被修改。</p>
+      </div>
+      <div class="card">
+        <div class="label">影响</div>
+        <div class="value">失败更快可见，socket 及时关闭</div>
+        <p>把 ssh2 channel 错误写入 Remote-SSH output。</p>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <section>
+          <h2>为什么这个仓库也要改</h2>
+          <p>主仓修复了远端 EH ready 被 language pack 安装卡住的问题，但 streamlocal 失败的第一阶段发生在 open-remote-ssh 插件内部。之前插件只打印 <code>Opening tunnel local =&gt; remote</code>，本地 listener 创建成功后就像“已连接”，真正每条 WebSocket 连接触发的 <code>openssh_forwardOutStreamLocal</code> 错误没有直接进入 Remote-SSH output。</p>
+          <div class="comment ok">
+            <strong>评论：这个修改不是为了让 kfs 从 socket 模式变通。</strong>
+            kfs 的核心 workaround 仍然是保持 <code>remoteServerListenOnSocket=false</code> 走 TCP。这个插件仓改动是为了下一次遇到类似机器时，日志能直接告诉我们是 <code>direct-streamlocal@openssh.com</code> 被拒，还是普通 <code>direct-tcpip</code> 失败。
+          </div>
+        </section>
+
+        <section>
+          <h2>代码评论</h2>
+          <h3>1. 底层 tunnel 失败事件带上连接上下文</h3>
+          <p class="file">src/ssh/sshConnection.ts</p>
+          <pre><code>const connectionId = ++this.__tunnelConnectionSeq;
+const localConnection = this.describeSocket(socket);
+const remoteTarget = SSHTunnelConfig.remotePort
+  ? `${SSHTunnelConfig.remoteAddr}:${SSHTunnelConfig.remotePort}`
+  : SSHTunnelConfig.remoteSocketPath!;</code></pre>
+          <div class="comment">
+            <strong>评论：connectionId 是排查关键。</strong>
+            resolver 创建的是一个本地 listener，后续 Management / ExtensionHost / 其他通道会分别连进来。给每条 accepted socket 编号后，可以把“哪一次本地连接”与“哪一次 SSH channel open 失败”对齐。
+          </div>
+
+          <h3>2. 区分 TCP 和 streamlocal</h3>
+          <p class="file">src/ssh/sshConnection.ts</p>
+          <pre><code>this.emitTunnelDisconnect(SSHTunnelConfig, err, {
+  connectionId,
+  forwardingType: 'direct-streamlocal@openssh.com',
+  localConnection,
+  remoteTarget
+});</code></pre>
+          <div class="comment">
+            <strong>评论：这会把 kfs 这类问题从 240 秒 timeout 变成一条明确错误。</strong>
+            以前只能在 renderer 里看到 WebSocket 1006，或者去远端 <code>/var/log/secure</code> 找 sshd 记录。现在 Remote-SSH output 就能看到 streamlocal channel 的原始错误和远端 socket path。
+          </div>
+
+          <h3>3. 上层输出到 Remote-SSH 日志</h3>
+          <p class="file">src/authResolver.ts</p>
+          <pre><code>this.logger.error(
+  `Tunnel connection failed: tunnel=${tunnelConfig.name}, connectionId=${connectionId}, ` +
+  `type=${forwardingType}, local=${localConnection}, remote=${remoteTarget}`,
+  payload.err
+);</code></pre>
+          <div class="comment">
+            <strong>评论：这里选择 output channel，而不是只 emit 事件。</strong>
+            用户和排障者通常看的就是 “Remote - SSH” output。把事件落到日志里，才方便确认是不是服务器策略、SELinux/sshd 加固、ProxyJump 或 TCP forwarding 问题。
+          </div>
+
+          <h3>4. 失败时立即关闭本地 socket</h3>
+          <p class="file">src/ssh/sshConnection.ts</p>
+          <pre><code>if (err) {
+  this.emitTunnelDisconnect(...);
+  closeSocket();
+  return;
+}</code></pre>
+          <div class="comment warning">
+            <strong>评论：这是用户体验上的小修复。</strong>
+            如果 SSH channel 已经打开失败，本地 socket 继续挂着只会让 renderer 侧等到更不透明的 websocket timeout。立即关闭能让失败更快浮出水面。
+          </div>
+        </section>
+      </div>
+
+      <aside>
+        <section>
+          <h2>变更文件</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>文件</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="file">src/ssh/sshConnection.ts</td>
+                <td>为每条 tunnel connection 记录上下文，失败时 emit 结构化错误并关闭 socket。</td>
+              </tr>
+              <tr>
+                <td class="file">src/authResolver.ts</td>
+                <td>订阅 tunnel disconnect 事件，并把 per-connection 失败写入 Remote-SSH output。</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section>
+          <h2>失败日志会长什么样</h2>
+          <pre><code>Tunnel connection failed:
+tunnel=ssh_tunnel_61698_/run/user/0/vscode-server-sock-...
+connectionId=2
+type=direct-streamlocal@openssh.com
+local=127.0.0.1:54321 -&gt; 127.0.0.1:61698
+remote=/run/user/0/vscode-server-sock-...</code></pre>
+          <div class="comment ok">
+            <strong>评论：看到 type 就能直接判断方向。</strong>
+            <code>direct-streamlocal@openssh.com</code> 失败，优先查 Unix socket forwarding。<code>direct-tcpip</code> 失败，再查普通端口转发或远端 server 端口。
+          </div>
+        </section>
+
+        <section>
+          <h2>确认清单</h2>
+          <div class="timeline">
+            <div class="event"><b>1.</b> 没有修改 <code>package.json</code> 中的默认 <code>remoteServerListenOnSocket=false</code>。</div>
+            <div class="event"><b>2.</b> 没有改变连接策略；只增强失败路径日志和 socket 关闭。</div>
+            <div class="event"><b>3.</b> <code>git diff --check</code> 已通过。</div>
+            <div class="event"><b>4.</b> <code>pnpm compile</code> 当前被既有依赖/类型环境阻塞，不是这次逻辑本身的单点问题。</div>
+          </div>
+        </section>
+
+        <section>
+          <h2>保留判断</h2>
+          <div class="comment ok">
+            <strong>建议保留。</strong>
+            它不改变成功路径，却显著提升失败路径可观测性。对“其他人机器为什么连不上”的排查很有价值。
+          </div>
+          <div class="comment risk">
+            <strong>风险很小。</strong>
+            主要行为变化是转发失败时立即 destroy 本地 socket；这与 SSH channel 已失败的事实一致，避免后续无意义等待。
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    本页是人工确认用说明，不参与插件运行时代码。对应提交：a3afe5a。
+  </footer>
+</body>
+</html>
